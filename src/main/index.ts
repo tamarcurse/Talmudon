@@ -1,9 +1,12 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { DatabaseService } from './database.js'
 
 const isDev = !app.isPackaged
 const rendererUrl = 'http://localhost:5173'
 const prodRendererPath = fileURLToPath(new URL('../dist/index.html', import.meta.url))
+const databaseService = new DatabaseService(path.join(app.getPath('userData'), 'talmudon.sqlite'))
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
@@ -33,8 +36,17 @@ function createWindow() {
 }
 
 ipcMain.handle('app:get-version', () => app.getVersion())
+ipcMain.handle('database:initialize', () => {
+  databaseService.initialize()
+  return { ok: true }
+})
+ipcMain.handle('database:get-tractates', () => databaseService.getTractates())
+ipcMain.handle('database:get-user-setting', (_event, settingName: string) =>
+  databaseService.getUserSetting(settingName),
+)
 
 app.whenReady().then(() => {
+  databaseService.initialize()
   createWindow()
 
   app.on('activate', () => {
@@ -42,6 +54,10 @@ app.whenReady().then(() => {
       createWindow()
     }
   })
+})
+
+app.on('before-quit', () => {
+  databaseService.close()
 })
 
 app.on('window-all-closed', () => {
