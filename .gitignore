@@ -12,7 +12,8 @@ dist
 dist-electron
 dist-ssr
 *.local
-
+downloads
+electron-headers
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
