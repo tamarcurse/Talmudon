@@ -3,7 +3,9 @@ import type { PaceMode, ProgramInput } from '../../../main/database'
 import { useCalendar } from '../../context/CalendarContext'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import { computeEndDate, computePagesPerDay, countDafim } from '../../../main/schedule'
+import { HOLIDAY_GROUPS } from '../../../main/holidays'
 import DateField from './DateField'
+import HolidayPicker from './HolidayPicker'
 
 type Tractate = { id: number; name_he: string; name_en: string; total_pages: number }
 type ShasPage = { page_number: number; page_label_he: string }
@@ -39,6 +41,20 @@ function formatDafCount(count: number): string {
   return count === 1 ? 'דף אחד' : `${count} דפים`
 }
 
+function summarizeHolidays(selected: string[]): string {
+  const parts: string[] = []
+  for (const group of HOLIDAY_GROUPS) {
+    const chosen = group.leaves.filter((leaf) => selected.includes(leaf.id))
+    if (chosen.length === 0) continue
+    parts.push(
+      chosen.length === group.leaves.length
+        ? group.name
+        : `${group.name} (${chosen.map((leaf) => leaf.name).join(', ')})`,
+    )
+  }
+  return parts.length === 0 ? 'אין' : parts.join(', ')
+}
+
 type Plan = { pagesPerDay: number; targetEndDate: string } | { error: string }
 
 function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: StudyProgramWizardProps) {
@@ -64,6 +80,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   const [targetDate, setTargetDate] = useState('')
   const [restWeekdays, setRestWeekdays] = useState<number[]>([])
   const [restDates, setRestDates] = useState<string[]>([])
+  const [restHolidays, setRestHolidays] = useState<string[]>([])
   const [pendingRestDate, setPendingRestDate] = useState(todayIso)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -101,6 +118,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
           setTargetDate(program.targetEndDate)
           setRestWeekdays(program.restWeekdays)
           setRestDates(program.restDates)
+          setRestHolidays(program.restHolidays)
         }
         setLoaded(true)
       })
@@ -125,7 +143,10 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   const rangeValid =
     tractate !== null && startPage >= FIRST_DAF && startPage <= endPage && endPage <= tractate.total_pages
   const totalDafim = rangeValid ? countDafim(startPage, endPage) : 0
-  const rest = useMemo(() => ({ weekdays: restWeekdays, dates: restDates }), [restWeekdays, restDates])
+  const rest = useMemo(
+    () => ({ weekdays: restWeekdays, dates: restDates, holidays: restHolidays }),
+    [restWeekdays, restDates, restHolidays],
+  )
 
   const plan: Plan = useMemo(() => {
     if (!rangeValid) return { error: 'טווח הלימוד אינו תקין' }
@@ -208,6 +229,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
       targetEndDate: plan.targetEndDate,
       restWeekdays: [...restWeekdays].sort((a, b) => a - b),
       restDates,
+      restHolidays,
     }
 
     setSaving(true)
@@ -412,6 +434,10 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 ))}
               </div>
             </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm text-muted">חגים ומועדים</legend>
+              <HolidayPicker selected={restHolidays} onChange={setRestHolidays} fromIso={startDate} />
+            </fieldset>
             <div className="space-y-2 text-sm text-muted">
               <span className="block">תאריכי מנוחה מיוחדים (חגים, אירועים)</span>
               <div className="flex flex-wrap items-center gap-3">
@@ -471,6 +497,8 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                     ...restDates.map((date) => formatIsoDate(date, calendarType)),
                   ].join(', ')}
             </dd>
+            <dt className="text-muted">חגים</dt>
+            <dd className="text-ink">{summarizeHolidays(restHolidays)}</dd>
           </dl>
         )
     }
