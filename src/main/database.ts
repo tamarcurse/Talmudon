@@ -83,9 +83,9 @@ const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> =
   { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
 ]
 
-const PAGE_PROGRESS_MIGRATIONS: Array<{ column: string; definition: string }> = [
-  { column: 'is_page_completed', definition: 'is_page_completed BOOLEAN NOT NULL DEFAULT 0' },
-]
+// A page (daf) is complete when all four parts are done; side/page completion is derived, not stored.
+const PAGE_COMPLETE_SQL =
+  '(side_a_rashi AND side_a_tosafot AND side_b_rashi AND side_b_tosafot)'
 
 const MIN_PAGE_NUMBER = 2
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
@@ -200,7 +200,7 @@ export class DatabaseService {
     db.exec(SCHEMA_SQL)
     this.migrateUserSettings()
     this.migrateStudyPrograms()
-    this.applyColumnMigrations('page_progress', PAGE_PROGRESS_MIGRATIONS)
+    this.migratePageProgress()
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -212,7 +212,7 @@ export class DatabaseService {
   }
 
   private applyColumnMigrations(
-    table: 'user_settings' | 'study_programs' | 'page_progress',
+    table: 'user_settings' | 'study_programs',
     migrations: Array<{ column: string; definition: string }>,
   ): void {
     const db = this.ensureDatabase()
@@ -224,6 +224,23 @@ export class DatabaseService {
         db.exec(`ALTER TABLE ${table} ADD COLUMN ${migration.definition}`)
       }
     }
+  }
+
+  // Drops the redundant is_page_completed column from older databases, keeping completed pages completed.
+  private migratePageProgress(): void {
+    const db = this.ensureDatabase()
+    const columns = db.prepare('PRAGMA table_info(page_progress)').all() as Array<{ name: string }>
+    if (!columns.some((column) => column.name === 'is_page_completed')) {
+      return
+    }
+    db.transaction(() => {
+      db.exec(
+        `UPDATE page_progress
+            SET side_a_rashi = 1, side_a_tosafot = 1, side_b_rashi = 1, side_b_tosafot = 1
+          WHERE is_page_completed = 1`,
+      )
+      db.exec('ALTER TABLE page_progress DROP COLUMN is_page_completed')
+    })()
   }
 
   private migrateUserSettings(): void {
@@ -452,7 +469,10 @@ export class DatabaseService {
     }
 
     const rows = db
-      .prepare('SELECT id, page_number, is_page_completed FROM page_progress WHERE program_id = ?')
+      .prepare(
+        `SELECT id, page_number, ${PAGE_COMPLETE_SQL} AS is_page_completed
+           FROM page_progress WHERE program_id = ?`,
+      )
       .all(id) as Array<{ id: number; page_number: number; is_page_completed: number }>
     const completed = new Set(rows.filter((r) => r.is_page_completed).map((r) => r.page_number))
     const pendingIds = new Map(rows.filter((r) => !r.is_page_completed).map((r) => [r.page_number, r.id]))
@@ -511,7 +531,8 @@ export class DatabaseService {
     const db = this.ensureDatabase()
     const rows = db
       .prepare(
-        `SELECT id, page_number, scheduled_date, is_page_completed FROM page_progress
+        `SELECT id, page_number, scheduled_date, ${PAGE_COMPLETE_SQL} AS is_page_completed
+           FROM page_progress
           WHERE program_id = ? ORDER BY page_number ASC`,
       )
       .all(programId) as Array<{
@@ -533,10 +554,11 @@ export class DatabaseService {
     const result = db
       .prepare(
         `UPDATE page_progress
-            SET is_page_completed = ?, completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
-          WHERE program_id = ? AND page_number = ?`,
+            SET side_a_rashi = ?1, side_a_tosafot = ?1, side_b_rashi = ?1, side_b_tosafot = ?1,
+                completed_at = CASE WHEN ?1 THEN CURRENT_TIMESTAMP ELSE NULL END
+          WHERE program_id = ?2 AND page_number = ?3`,
       )
-      .run(completed ? 1 : 0, completed ? 1 : 0, programId, pageNumber)
+      .run(completed ? 1 : 0, programId, pageNumber)
     if (result.changes === 0) {
       throw new Error(`Unknown page ${pageNumber} in program ${programId}`)
     }
