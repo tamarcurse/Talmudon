@@ -24,3 +24,6 @@ electron-headers
 *.njsproj
 *.sln
 *.sw?
+
+# Engineering skills now live in ~/.claude/skills (personal), not in this repo
+/skills/
