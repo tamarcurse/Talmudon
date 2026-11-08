@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { computeProgramMetrics, type ProgramMetrics } from './metrics.js'
 import { computeEndDate, computePagesPerDay, planSchedule } from './schedule.js'
 import { TRACTATES_SEED, buildShasPagesSeed } from './seed-data.js'
 
@@ -46,6 +47,15 @@ export type ProgramInput = {
 
 export type ProgramRecord = ProgramInput & { id: number }
 
+export const PROGRAM_STATUSES = ['active', 'paused'] as const
+export type ProgramStatus = (typeof PROGRAM_STATUSES)[number]
+
+export type ProgramSummary = ProgramMetrics & {
+  id: number
+  programName: string
+  status: ProgramStatus
+}
+
 export type PageProgressRecord = {
   id: number
   pageNumber: number
@@ -81,6 +91,7 @@ const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = 
 const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> = [
   { column: 'start_date', definition: 'start_date TEXT' },
   { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
+  { column: 'paused_at', definition: 'paused_at TEXT' },
 ]
 
 // A page (daf) is complete when all four parts are done; side/page completion is derived, not stored.
@@ -554,11 +565,11 @@ export class DatabaseService {
     const result = db
       .prepare(
         `UPDATE page_progress
-            SET side_a_rashi = ?1, side_a_tosafot = ?1, side_b_rashi = ?1, side_b_tosafot = ?1,
-                completed_at = CASE WHEN ?1 THEN CURRENT_TIMESTAMP ELSE NULL END
-          WHERE program_id = ?2 AND page_number = ?3`,
+            SET side_a_rashi = @done, side_a_tosafot = @done, side_b_rashi = @done, side_b_tosafot = @done,
+                completed_at = CASE WHEN @done THEN CURRENT_TIMESTAMP ELSE NULL END
+          WHERE program_id = @programId AND page_number = @pageNumber`,
       )
-      .run(completed ? 1 : 0, programId, pageNumber)
+      .run({ done: completed ? 1 : 0, programId, pageNumber })
     if (result.changes === 0) {
       throw new Error(`Unknown page ${pageNumber} in program ${programId}`)
     }
@@ -614,6 +625,48 @@ export class DatabaseService {
         .filter((rest) => rest.rest_type === 'date' && rest.specific_date !== null)
         .map((rest) => rest.specific_date as string),
     }
+  }
+
+  listProgramSummaries(today: string = localToday()): ProgramSummary[] {
+    const db = this.ensureDatabase()
+    const rows = db
+      .prepare('SELECT id, program_name, status, paused_at FROM study_programs ORDER BY id ASC')
+      .all() as Array<{ id: number; program_name: string; status: ProgramStatus; paused_at: string | null }>
+
+    return rows.map((row) => {
+      const program = this.getProgram(row.id) as ProgramRecord
+      const metrics = computeProgramMetrics({
+        pages: this.getPageProgress(row.id),
+        today,
+        status: row.status,
+        pausedAt: row.paused_at,
+        startDate: program.startDate,
+        pagesPerDay: program.pagesPerDay,
+        rest: { weekdays: program.restWeekdays, dates: program.restDates },
+      })
+      return { id: row.id, programName: row.program_name, status: row.status, ...metrics }
+    })
+  }
+
+  setProgramStatus(id: number, status: string, today: string = localToday()): void {
+    if (!(PROGRAM_STATUSES as readonly unknown[]).includes(status)) {
+      throw new Error(`Invalid program status: ${String(status)}`)
+    }
+    if (!isValidIsoDate(today)) {
+      throw new Error(`Invalid date: ${String(today)}`)
+    }
+    const db = this.ensureDatabase()
+    db.transaction(() => {
+      const result = db
+        .prepare('UPDATE study_programs SET status = ?, paused_at = ? WHERE id = ?')
+        .run(status, status === 'paused' ? today : null, id)
+      if (result.changes === 0) {
+        throw new Error(`Unknown program: ${id}`)
+      }
+      if (status === 'active') {
+        this.recalculateInTransaction(id, today)
+      }
+    })()
   }
 
   getPageCount(): number {

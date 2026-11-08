@@ -56,6 +56,10 @@ ipcMain.handle('database:update-program', (_event, id: number, input: ProgramInp
   databaseService.updateProgram(id, input),
 )
 ipcMain.handle('database:get-program', (_event, id: number) => databaseService.getProgram(id))
+ipcMain.handle('database:list-program-summaries', () => databaseService.listProgramSummaries())
+ipcMain.handle('database:set-program-status', (_event, id: number, status: string) =>
+  databaseService.setProgramStatus(id, status),
+)
 
 ipcMain.handle('database:recalculate-program', (_event, id: number) =>
   databaseService.recalculateProgram(id),

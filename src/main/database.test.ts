@@ -463,3 +463,92 @@ describe('page_progress schedule', () => {
     expect(dates(service, id)[0]).toBe('2026-03-02')
   })
 })
+
+describe('program summaries and pause/resume', () => {
+  function setup() {
+    const service = new DatabaseService(createTestPath('summaries'))
+    testServices.push(service)
+    return service.initialize()
+  }
+
+  const input: ProgramInput = {
+    tractateId: 1,
+    programName: 'תוכנית א',
+    startPage: 2,
+    endPage: 5,
+    startDate: '2026-01-01',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-01-04',
+    restWeekdays: [],
+    restDates: [],
+  }
+
+  it('opens an older database without paused_at and reports programs as active', () => {
+    const dbPath = createTestPath('summaries-migration')
+    const first = new DatabaseService(dbPath)
+    first.initialize()
+    first.createProgram(input)
+    first.close()
+
+    const raw = new Database(dbPath)
+    raw.exec('ALTER TABLE study_programs DROP COLUMN paused_at')
+    raw.close()
+
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+    service.initialize()
+    expect(service.listProgramSummaries('2026-01-02')[0]).toMatchObject({ status: 'active' })
+  })
+
+  it('lists a summary with metrics for each program, ordered by id', () => {
+    const service = setup()
+    const a = service.createProgram(input)
+    const b = service.createProgram({ ...input, programName: 'תוכנית ב' })
+    service.setPageCompleted(a, 2, true)
+    service.setPageCompleted(a, 3, true)
+
+    const summaries = service.listProgramSummaries('2026-01-03')
+    expect(summaries.map((s) => s.id)).toEqual([a, b])
+    expect(summaries[0]).toMatchObject({
+      programName: 'תוכנית א',
+      status: 'active',
+      percentComplete: 50,
+      lag: 0,
+      lead: 0,
+      estimatedEndDate: '2026-01-04',
+    })
+    expect(summaries[1]).toMatchObject({ programName: 'תוכנית ב', percentComplete: 0, lag: 2 })
+  })
+
+  it('pausing freezes lag as time moves forward', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    service.setProgramStatus(id, 'paused', '2026-01-03')
+
+    expect(service.listProgramSummaries('2026-01-03')[0]).toMatchObject({ status: 'paused', lag: 2 })
+    expect(service.listProgramSummaries('2026-02-20')[0]).toMatchObject({ status: 'paused', lag: 2 })
+  })
+
+  it('resuming clears the pause and reschedules pending pages from the new today', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    service.setProgramStatus(id, 'paused', '2026-01-03')
+    service.setProgramStatus(id, 'active', '2026-02-01')
+
+    expect(service.listProgramSummaries('2026-02-01')[0]).toMatchObject({ status: 'active', lag: 0 })
+    expect(service.getPageProgress(id).map((p) => p.scheduledDate)).toEqual([
+      '2026-02-01',
+      '2026-02-02',
+      '2026-02-03',
+      '2026-02-04',
+    ])
+  })
+
+  it('rejects an invalid status or unknown program', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    expect(() => service.setProgramStatus(id, 'bogus', '2026-01-03')).toThrow(/status/i)
+    expect(() => service.setProgramStatus(9999, 'paused', '2026-01-03')).toThrow(/unknown program/i)
+  })
+})

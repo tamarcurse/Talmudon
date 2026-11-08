@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import { toHebrewPageLabel } from '../main/hebrew-page-label'
-import type { ProgramInput, ProgramRecord, ShasPageRecord } from '../main/database'
+import type { ProgramInput, ProgramRecord, ProgramStatus, ProgramSummary, ShasPageRecord } from '../main/database'
 
 export const TRACTATES_FIXTURE = [
   { id: 1, name_he: 'ברכות', name_en: 'Berakhot', total_pages: 64 },
@@ -24,10 +24,18 @@ export type MockBridgeOptions = {
   /** Program returned by getProgram (edit mode). */
   program?: ProgramRecord | null
   createdProgramId?: number
+  /** Summaries returned by listProgramSummaries (dashboard). */
+  summaries?: ProgramSummary[]
 }
 
 export function mockBridge(options: MockBridgeOptions = {}) {
+  // Stateful so pausing/resuming is reflected in the next listProgramSummaries call.
+  let summaries = options.summaries ?? []
   const bridge = {
+    listProgramSummaries: vi.fn(async () => summaries),
+    setProgramStatus: vi.fn(async (id: number, status: ProgramStatus) => {
+      summaries = summaries.map((summary) => (summary.id === id ? { ...summary, status } : summary))
+    }),
     getUserSetting: vi.fn().mockResolvedValue(options.calendar ?? null),
     setUserSetting: vi.fn().mockResolvedValue(undefined),
     getTractates: vi.fn().mockResolvedValue(options.tractates ?? TRACTATES_FIXTURE),

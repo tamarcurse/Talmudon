@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PageProgressRecord, ProgramInput, ProgramRecord, ShasPageRecord } from './database.js'
+import type { PageProgressRecord, ProgramInput, ProgramRecord, ProgramStatus, ProgramSummary, ShasPageRecord } from './database.js'
 
 contextBridge.exposeInMainWorld('talmudonBridge', {
   getVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('talmudonBridge', {
   createProgram: (input: ProgramInput) => ipcRenderer.invoke('database:create-program', input),
   updateProgram: (id: number, input: ProgramInput) => ipcRenderer.invoke('database:update-program', id, input),
   getProgram: (id: number) => ipcRenderer.invoke('database:get-program', id),
+  listProgramSummaries: () => ipcRenderer.invoke('database:list-program-summaries'),
+  setProgramStatus: (id: number, status: ProgramStatus) =>
+    ipcRenderer.invoke('database:set-program-status', id, status),
   recalculateProgram: (id: number) => ipcRenderer.invoke('database:recalculate-program', id),
   getPageProgress: (programId: number) => ipcRenderer.invoke('database:get-page-progress', programId),
   setPageCompleted: (programId: number, pageNumber: number, completed: boolean) =>
@@ -32,6 +35,8 @@ declare global {
       createProgram: (input: ProgramInput) => Promise<number>
       updateProgram: (id: number, input: ProgramInput) => Promise<void>
       getProgram: (id: number) => Promise<ProgramRecord | null>
+      listProgramSummaries: () => Promise<ProgramSummary[]>
+      setProgramStatus: (id: number, status: ProgramStatus) => Promise<void>
       recalculateProgram: (id: number) => Promise<void>
       getPageProgress: (programId: number) => Promise<PageProgressRecord[]>
       setPageCompleted: (programId: number, pageNumber: number, completed: boolean) => Promise<void>
