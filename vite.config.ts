@@ -19,5 +19,6 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: './src/test/setup.ts',
     css: true,
+    exclude: ['**/dist-electron/**', 'node_modules/**'],
   },
 })

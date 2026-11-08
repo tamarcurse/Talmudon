@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { TRACTATES_SEED, buildShasPagesSeed } from './seed-data.js'
 
 export type TractateRecord = {
   id: number
@@ -27,6 +28,19 @@ export type StudyProgramRecord = {
 }
 
 type SqliteDatabase = InstanceType<typeof Database>
+
+const ALLOWED_TABLE_NAMES = new Set([
+  'tractates',
+  'shas_pages',
+  'study_programs',
+  'program_rest_days',
+  'page_progress',
+  'user_settings',
+])
+
+const ALLOWED_USER_SETTING_NAMES = new Set(['show_hebrew_dates'])
+
+
 
 const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -88,59 +102,6 @@ CREATE TABLE IF NOT EXISTS user_settings (
 
 INSERT OR IGNORE INTO user_settings (id, show_hebrew_dates) VALUES (1, 0);
 `
-
-const TRACTATES_SEED: Array<Omit<TractateRecord, 'id'>> = [
-  { name_he: 'ברכות', name_en: 'Berakhot', total_pages: 64 },
-  { name_he: 'שבת', name_en: 'Shabbat', total_pages: 156 },
-  { name_he: 'עירובין', name_en: 'Eruvin', total_pages: 104 },
-  { name_he: 'פסחים', name_en: 'Pesachim', total_pages: 120 },
-  { name_he: 'שקלים', name_en: 'Shekalim', total_pages: 22 },
-  { name_he: 'יומא', name_en: 'Yoma', total_pages: 88 },
-  { name_he: 'סוכה', name_en: 'Sukkah', total_pages: 56 },
-  { name_he: 'ביצה', name_en: 'Beitzah', total_pages: 40 },
-  { name_he: 'ראש השנה', name_en: 'Rosh Hashanah', total_pages: 35 },
-  { name_he: 'תענית', name_en: 'Taanit', total_pages: 28 },
-  { name_he: 'מגילה', name_en: 'Megillah', total_pages: 32 },
-  { name_he: 'מועד קטן', name_en: 'Moed Katan', total_pages: 29 },
-  { name_he: 'חגיגה', name_en: 'Chagigah', total_pages: 27 },
-  { name_he: 'יבמות', name_en: 'Yevamot', total_pages: 122 },
-  { name_he: 'כתובות', name_en: 'Ketubot', total_pages: 112 },
-  { name_he: 'נדרים', name_en: 'Nedarim', total_pages: 90 },
-  { name_he: 'נזיר', name_en: 'Nazir', total_pages: 66 },
-  { name_he: 'סוטה', name_en: 'Sotah', total_pages: 49 },
-  { name_he: 'גיטין', name_en: 'Gittin', total_pages: 90 },
-  { name_he: 'קידושין', name_en: 'Kiddushin', total_pages: 82 },
-  { name_he: 'בבא קמא', name_en: 'Bava Kamma', total_pages: 119 },
-  { name_he: 'בבא מציעא', name_en: 'Bava Metzia', total_pages: 119 },
-  { name_he: 'בבא בתרא', name_en: 'Bava Batra', total_pages: 176 },
-  { name_he: 'סנהדרין', name_en: 'Sanhedrin', total_pages: 113 },
-  { name_he: 'מכות', name_en: 'Makkot', total_pages: 24 },
-  { name_he: 'שבועות', name_en: 'Shevuot', total_pages: 49 },
-  { name_he: 'עבודה זרה', name_en: 'Avodah Zarah', total_pages: 76 },
-  { name_he: 'הוריות', name_en: 'Horayot', total_pages: 14 },
-  { name_he: 'זבחים', name_en: 'Zevachim', total_pages: 120 },
-  { name_he: 'מנחות', name_en: 'Menachot', total_pages: 110 },
-  { name_he: 'חולין', name_en: 'Chullin', total_pages: 142 },
-  { name_he: 'בכורות', name_en: 'Bechorot', total_pages: 61 },
-  { name_he: 'ערכין', name_en: 'Arachin', total_pages: 34 },
-  { name_he: 'תמורה', name_en: 'Temurah', total_pages: 34 },
-  { name_he: 'כריתות', name_en: 'Keritot', total_pages: 28 },
-  { name_he: 'מעילה', name_en: 'Meilah', total_pages: 22 },
-  { name_he: 'נדה', name_en: 'Niddah', total_pages: 73 },
-]
-
-function buildShasPagesSeed(): ShasPageRecord[] {
-  const labels = ['א', 'ב', 'ג', 'ד', 'ה', 'ש', 'ז', 'ח', 'ט', 'י', 'כ', 'ל', 'מ', 'נ', 'ס', 'ע', 'פ', 'צ', 'ק', 'ר', 'ש', 'ת']
-
-  return Array.from({ length: 200 }, (_, index) => {
-    const pageNumber = index + 1
-    const labelIndex = (pageNumber - 1) % labels.length
-    return {
-      page_number: pageNumber,
-      page_label_he: `${labels[labelIndex]}'`,
-    }
-  })
-}
 
 export class DatabaseService {
   private db: SqliteDatabase | null = null
@@ -231,13 +192,29 @@ export class DatabaseService {
     return result.total
   }
 
+  getPageLabel(pageNumber: number): string | null {
+    const db = this.ensureDatabase()
+    const result = db
+      .prepare('SELECT page_label_he FROM shas_pages WHERE page_number = ?')
+      .get(pageNumber) as { page_label_he: string } | undefined
+    return result?.page_label_he ?? null
+  }
+
   getRowCount(tableName: string): number {
+    if (!ALLOWED_TABLE_NAMES.has(tableName)) {
+      throw new Error(`Unknown table name: ${tableName}`)
+    }
+
     const db = this.ensureDatabase()
     const result = db.prepare(`SELECT COUNT(*) AS total FROM ${tableName}`).get() as { total: number }
     return result.total
   }
 
   getUserSetting<T = boolean>(settingName: string): T | null {
+    if (!ALLOWED_USER_SETTING_NAMES.has(settingName)) {
+      throw new Error(`Unknown setting name: ${settingName}`)
+    }
+
     const db = this.ensureDatabase()
     const result = db
       .prepare(`SELECT ${settingName} AS value FROM user_settings WHERE id = 1`)

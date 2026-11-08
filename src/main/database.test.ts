@@ -46,6 +46,16 @@ describe('DatabaseService', () => {
     expect(service.getRowCount('study_programs')).toBe(0)
   })
 
+  it('seeds Hebrew page labels using correct gematria for multi-digit pages', () => {
+    const dbPath = createTestPath('page-labels')
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+
+    service.initialize()
+
+    expect(service.getPageLabel(15)).toBe('ט"ו')
+  })
+
   it('re-runs safely without duplicating seed data or breaking the schema', () => {
     const dbPath = createTestPath('migration-safe')
     const service = new DatabaseService(dbPath)
@@ -58,5 +68,25 @@ describe('DatabaseService', () => {
     expect(service.getPageCount()).toBe(200)
     expect(service.getRowCount('tractates')).toBe(37)
     expect(service.getRowCount('shas_pages')).toBe(200)
+  })
+
+  it('rejects table names that are not on the allow-list', () => {
+    const dbPath = createTestPath('row-count-whitelist')
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+
+    service.initialize()
+
+    expect(() => service.getRowCount('sqlite_master')).toThrow()
+  })
+
+  it('rejects setting names that are not on the allow-list', () => {
+    const dbPath = createTestPath('user-setting-whitelist')
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+
+    service.initialize()
+
+    expect(() => service.getUserSetting('(SELECT sql FROM sqlite_master)')).toThrow()
   })
 })

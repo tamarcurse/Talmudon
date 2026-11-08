@@ -2,8 +2,8 @@
 
 ## Tech Stack
 
-- Tauri v2 for the desktop shell and offline-first application environment.
-- Rust for the local backend and future SQLite/IPC integration.
+- Electron for the desktop shell and offline-first application environment.
+- Node.js + TypeScript for the main process and local SQLite/IPC integration.
 - React + TypeScript for the frontend UI.
 - Tailwind CSS for layout, theming, and RTL support.
 - Node.js runtime: use the local installation from `C:\node-v26.13.0-win-x64` when running project commands.
