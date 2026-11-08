@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('talmudonBridge', {
     ipcRenderer.invoke('database:set-user-setting', settingName, value),
   getShasPages: () => ipcRenderer.invoke('database:get-shas-pages'),
   createProgram: (input: ProgramInput) => ipcRenderer.invoke('database:create-program', input),
+  createPrograms: (inputs: ProgramInput[]) => ipcRenderer.invoke('database:create-programs', inputs),
   updateProgram: (id: number, input: ProgramInput) => ipcRenderer.invoke('database:update-program', id, input),
   getProgram: (id: number) => ipcRenderer.invoke('database:get-program', id),
   listProgramSummaries: () => ipcRenderer.invoke('database:list-program-summaries'),
@@ -45,11 +46,12 @@ declare global {
       getVersion: () => Promise<string>
       ping: () => string
       initializeDatabase: () => Promise<{ ok: boolean }>
-      getTractates: () => Promise<Array<{ id: number; name_he: string; name_en: string; total_pages: number }>>
+      getTractates: () => Promise<Array<{ id: number; name_he: string; name_en: string; total_pages: number; first_page: number }>>
       getUserSetting: (settingName: string) => Promise<boolean | number | string | null>
       setUserSetting: (settingName: string, value: boolean | string) => Promise<void>
       getShasPages: () => Promise<ShasPageRecord[]>
       createProgram: (input: ProgramInput) => Promise<number>
+      createPrograms: (inputs: ProgramInput[]) => Promise<number[]>
       updateProgram: (id: number, input: ProgramInput) => Promise<void>
       getProgram: (id: number) => Promise<ProgramRecord | null>
       listProgramSummaries: () => Promise<ProgramSummary[]>

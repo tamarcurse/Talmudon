@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProgramRecord } from '../../../main/database'
 import { mockBridge, type MockBridgeOptions } from '../../../test/mockBridge'
 import { CalendarProvider } from '../../context/CalendarContext'
-import { formatHebrewDate } from '../../lib/hebrewDate'
+import { formatHebrewDate, formatIsoDate } from '../../lib/hebrewDate'
+import { hebrewMonthEndDate } from '../../../main/templates'
 import StudyProgramWizard from './StudyProgramWizard'
 
 // 2026-11-08 is a Sunday.
@@ -14,9 +15,14 @@ afterEach(() => {
 })
 
 async function renderWizard(
-  options: MockBridgeOptions & { mode?: 'create' | 'edit'; programId?: number } = {},
+  options: MockBridgeOptions & {
+    mode?: 'create' | 'edit'
+    programId?: number
+    /** Template to pick after loading (create mode); null stays on the template step. */
+    template?: string | null
+  } = {},
 ) {
-  const { mode = 'create', programId, ...bridgeOptions } = options
+  const { mode = 'create', programId, template = 'תוכנית מותאמת אישית', ...bridgeOptions } = options
   const bridge = mockBridge(bridgeOptions)
   const onSaved = vi.fn()
   const onCancel = vi.fn()
@@ -31,8 +37,18 @@ async function renderWizard(
       />
     </CalendarProvider>,
   )
-  await screen.findByLabelText('חיפוש מסכת')
+  if (mode === 'create' && template === null) {
+    await screen.findByRole('button', { name: /תוכנית מותאמת אישית/ })
+  } else if (mode === 'create') {
+    chooseTemplate(await screen.findByRole('button', { name: new RegExp(template) }))
+  }
+  if (template !== null || mode === 'edit') await screen.findByLabelText('חיפוש מסכת')
   return { bridge, onSaved, onCancel }
+}
+
+function chooseTemplate(button: HTMLElement) {
+  fireEvent.click(button)
+  next()
 }
 
 function pickTractate(name: string) {
@@ -530,5 +546,216 @@ describe('edit mode', () => {
 
     expect(screen.getByRole('radio', { name: 'לפי קצב יומי' })).toBeChecked()
     expect((screen.getByLabelText('דפים ביום') as HTMLInputElement).value).toBe('2')
+  })
+})
+
+describe('templates', () => {
+  // On 2026-11-08 the worldwide cycle is at Bechorot 51; Bechorot runs 2026-09-20 .. 2026-11-18.
+  const bechorotToday = {
+    tractateId: 6,
+    programName: 'דף יומי – מסכת בכורות',
+    startPage: 51,
+    endPage: 61,
+    startDate: TODAY,
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-18',
+    restWeekdays: [],
+    restDates: [],
+    restHolidays: [],
+  }
+
+  function chooseCard(name: RegExp) {
+    fireEvent.click(screen.getByRole('button', { name }))
+  }
+
+  it('offers the three templates, and the custom one continues to the usual first step', async () => {
+    await renderWizard({ template: null })
+    expect(screen.getByRole('button', { name: /דף יומי/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /מסכת בחודש/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /תוכנית מותאמת אישית/ })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'הבא' })).toBeDisabled()
+
+    chooseCard(/תוכנית מותאמת אישית/)
+    next()
+    expect(screen.getByLabelText('חיפוש מסכת')).toBeInTheDocument()
+  })
+
+  it('does not show the template step when editing', async () => {
+    await renderWizard({
+      mode: 'edit',
+      programId: 7,
+      program: { ...bechorotToday, id: 7, status: 'active', completedAt: null } as ProgramRecord,
+    })
+    expect(screen.queryByText('תבנית')).not.toBeInTheDocument()
+  })
+
+  it("daf yomi: shows today's daf and goes from today to the summary", async () => {
+    const { bridge, onSaved } = await renderWizard({ template: null })
+    chooseCard(/דף יומי/)
+    expect(screen.getByTestId('daf-yomi-today')).toHaveTextContent('הדף היום: בכורות נ"א')
+
+    next()
+
+    const summary = screen.getByTestId('program-summary')
+    expect(summary).toHaveTextContent('בכורות')
+    expect(summary).toHaveTextContent('נ"א – ס"א')
+    expect(summary).toHaveTextContent('11 דפים')
+    expect(summary).toHaveTextContent('8 בנובמבר 2026')
+    expect(summary).toHaveTextContent('18 בנובמבר 2026')
+    expect(summary).toHaveTextContent('דף אחד ביום')
+
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(1))
+    expect(bridge.createProgram).toHaveBeenCalledWith(bechorotToday)
+  })
+
+  it('daf yomi from the start of the tractate begins in the past', async () => {
+    const { bridge } = await renderWizard({ template: null })
+    chooseCard(/דף יומי/)
+    chooseRadio('מתחילת המסכת')
+    next()
+
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('20 בספטמבר 2026')
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+    await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
+    expect(bridge.createProgram).toHaveBeenCalledWith({
+      ...bechorotToday,
+      startPage: 2,
+      startDate: '2026-09-20',
+    })
+  })
+
+  it('a future tractate starts on the day the cycle reaches it', async () => {
+    const { bridge } = await renderWizard({ template: null })
+    chooseCard(/דף יומי/)
+    fireEvent.change(screen.getByLabelText('מסכת'), { target: { value: 'Berakhot' } })
+    next()
+
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('8 ביוני 2027')
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+    await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
+    expect(bridge.createProgram).toHaveBeenCalledWith(
+      expect.objectContaining({ tractateId: 1, startPage: 2, endPage: 64, startDate: '2027-06-08' }),
+    )
+  })
+
+  it('whole Shas creates every program to the end of the cycle in one call', async () => {
+    const names: Array<[string, string, number, number]> = [
+      ['Bechorot', 'בכורות', 2, 61],
+      ['Arachin', 'ערכין', 2, 34],
+      ['Temurah', 'תמורה', 2, 34],
+      ['Keritot', 'כריתות', 2, 28],
+      ['Meilah', 'מעילה', 2, 22],
+      ['Kinnim', 'קינים', 22, 25],
+      ['Tamid', 'תמיד', 25, 33],
+      ['Middot', 'מידות', 34, 37],
+      ['Niddah', 'נדה', 2, 73],
+    ]
+    const tractates = names.map(([name_en, name_he, first_page, total_pages], index) => ({
+      id: index + 1,
+      name_en,
+      name_he,
+      first_page,
+      total_pages,
+    }))
+    const { bridge, onSaved } = await renderWizard({ template: null, tractates, createdProgramIds: [11, 12] })
+    chooseCard(/דף יומי/)
+    chooseRadio('כל הש"ס')
+    next()
+
+    const summary = screen.getByTestId('program-summary')
+    expect(summary).toHaveTextContent('9')
+    expect(summary).toHaveTextContent('8 בנובמבר 2026')
+    expect(summary).toHaveTextContent('7 ביוני 2027')
+
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalledWith(11))
+    expect(bridge.createProgram).not.toHaveBeenCalled()
+    const inputs = bridge.createPrograms.mock.calls[0][0]
+    expect(inputs).toHaveLength(9)
+    expect(inputs[0]).toMatchObject({ ...bechorotToday, tractateId: 1 })
+    expect(inputs.at(-1)).toMatchObject({ tractateId: 9, startPage: 2, endPage: 73, targetEndDate: '2027-06-07' })
+  })
+
+  it('whole Shas is blocked when tractates are missing from the list', async () => {
+    await renderWizard({ template: null })
+    chooseCard(/דף יומי/)
+    chooseRadio('כל הש"ס')
+    expect(screen.getByText(/חסרות מסכתות/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'הבא' })).toBeDisabled()
+  })
+
+  it('daf yomi can be edited by going back; the cycle just stops being aligned', async () => {
+    const { bridge } = await renderWizard({ template: null })
+    chooseCard(/דף יומי/)
+    next()
+
+    previous() // pace
+    expect(screen.getByLabelText('דפים ביום')).toHaveValue(1)
+    previous() // rest days
+    fireEvent.click(screen.getByRole('checkbox', { name: 'שבת' }))
+    next()
+    next()
+
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+    await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
+    // 11 dafim from Sunday 2026-11-08 with Saturdays off: ends Wednesday 2026-11-19
+    expect(bridge.createProgram).toHaveBeenCalledWith({
+      ...bechorotToday,
+      restWeekdays: [6],
+      targetEndDate: '2026-11-19',
+    })
+  })
+
+  describe('tractate a month', () => {
+    const monthEnd = hebrewMonthEndDate(TODAY)
+
+    async function toPaceStep() {
+      const rendered = await renderWizard({ template: null })
+      chooseCard(/מסכת בחודש/)
+      next()
+      pickTractate('ברכות')
+      next() // range
+      next() // rest
+      next() // pace
+      return rendered
+    }
+
+    it('selects "by target date" with the end of the Hebrew month', async () => {
+      const { bridge } = await toPaceStep()
+      expect(screen.getByRole('radio', { name: 'לפי תאריך יעד' })).toBeChecked()
+
+      next()
+      fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+      await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
+      expect(bridge.createProgram).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tractateId: 1,
+          startPage: 2,
+          endPage: 64,
+          paceMode: 'target_date',
+          targetEndDate: monthEnd,
+        }),
+      )
+    })
+
+    it('recomputes the target when the start date changes, until it is changed by hand', async () => {
+      const { bridge } = await toPaceStep()
+
+      setDate('תאריך התחלה', '2026-11-20')
+      expect(screen.getByTestId('target-date-display')).toHaveTextContent(
+        formatIsoDate(hebrewMonthEndDate('2026-11-20'), 'gregorian'),
+      )
+
+      setDate('תאריך יעד', '2027-01-31')
+      setDate('תאריך התחלה', '2026-11-25')
+      next()
+      fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+      await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
+      expect(bridge.createProgram).toHaveBeenCalledWith(
+        expect.objectContaining({ startDate: '2026-11-25', targetEndDate: '2027-01-31' }),
+      )
+    })
   })
 })

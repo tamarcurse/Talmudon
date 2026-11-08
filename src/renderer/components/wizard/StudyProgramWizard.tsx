@@ -3,16 +3,35 @@ import type { PaceMode, ProgramInput } from '../../../main/database'
 import { useCalendar } from '../../context/CalendarContext'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import { computeEndDate, computePagesPerDay, countDafim } from '../../../main/schedule'
+import { DAF_YOMI_CYCLE, dafYomiOn } from '../../../main/daf-yomi'
+import { buildDafYomiInputs, hebrewMonthEndDate, type DafYomiMode } from '../../../main/templates'
 import { HOLIDAY_GROUPS } from '../../../main/holidays'
 import DateField from './DateField'
 import HolidayPicker from './HolidayPicker'
 
-type Tractate = { id: number; name_he: string; name_en: string; total_pages: number }
+type Tractate = { id: number; name_he: string; name_en: string; total_pages: number; first_page: number }
 type ShasPage = { page_number: number; page_label_he: string }
 type RangeMode = 'full' | 'custom'
 
-const FIRST_DAF = 2
-const STEP_TITLES = ['מסכת', 'טווח', 'ימי מנוחה', 'קצב', 'סיכום']
+type Template = 'daf_yomi' | 'tractate_month' | 'custom'
+type StepKey = 'template' | 'tractate' | 'range' | 'rest' | 'pace' | 'summary'
+
+const STEP_TITLES: Record<StepKey, string> = {
+  template: 'תבנית',
+  tractate: 'מסכת',
+  range: 'טווח',
+  rest: 'ימי מנוחה',
+  pace: 'קצב',
+  summary: 'סיכום',
+}
+const CREATE_STEPS: StepKey[] = ['template', 'tractate', 'range', 'rest', 'pace', 'summary']
+const EDIT_STEPS: StepKey[] = ['tractate', 'range', 'rest', 'pace', 'summary']
+const DAF_YOMI_MODES: Array<[DafYomiMode, string]> = [
+  ['from_today', 'מהיום'],
+  ['from_tractate_start', 'מתחילת המסכת'],
+  ['whole_shas', 'כל הש"ס'],
+]
+const CYCLE_NAMES = new Set(DAF_YOMI_CYCLE.map((item) => item.nameEn))
 const WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
 
 const inputClass = 'field'
@@ -66,14 +85,20 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   const [tractates, setTractates] = useState<Tractate[]>([])
   const [pages, setPages] = useState<ShasPage[]>([])
 
+  const steps = mode === 'edit' ? EDIT_STEPS : CREATE_STEPS
   const [step, setStep] = useState(0)
+  const [template, setTemplate] = useState<Template | null>(null)
+  const [dafYomiMode, setDafYomiMode] = useState<DafYomiMode>('from_today')
+  const [dafYomiTractate, setDafYomiTractate] = useState('')
+  const [batch, setBatch] = useState<ProgramInput[] | null>(null)
+  const [targetTouched, setTargetTouched] = useState(false)
   const [search, setSearch] = useState('')
   const [tractateId, setTractateId] = useState<number | null>(null)
   const [programName, setProgramName] = useState('')
   const [nameTouched, setNameTouched] = useState(false)
   const [rangeMode, setRangeMode] = useState<RangeMode>('full')
-  const [customStart, setCustomStart] = useState(FIRST_DAF)
-  const [customEnd, setCustomEnd] = useState(FIRST_DAF)
+  const [customStart, setCustomStart] = useState(2)
+  const [customEnd, setCustomEnd] = useState(2)
   const [startDate, setStartDate] = useState(todayIso)
   const [paceMode, setPaceMode] = useState<PaceMode>('daily_pace')
   const [paceInput, setPaceInput] = useState('1')
@@ -105,7 +130,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             return
           }
           const tractate = loadedTractates.find((item) => item.id === program.tractateId)
-          const isFull = program.startPage === FIRST_DAF && program.endPage === tractate?.total_pages
+          const isFull = program.startPage === tractate?.first_page && program.endPage === tractate?.total_pages
           setTractateId(program.tractateId)
           setProgramName(program.programName)
           setNameTouched(true)
@@ -138,10 +163,11 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
     return (pageNumber: number) => labels.get(pageNumber) ?? String(pageNumber)
   }, [pages])
 
-  const startPage = rangeMode === 'full' ? FIRST_DAF : customStart
-  const endPage = rangeMode === 'full' ? (tractate?.total_pages ?? FIRST_DAF) : customEnd
+  const firstDaf = tractate?.first_page ?? 2
+  const startPage = rangeMode === 'full' ? firstDaf : customStart
+  const endPage = rangeMode === 'full' ? (tractate?.total_pages ?? firstDaf) : customEnd
   const rangeValid =
-    tractate !== null && startPage >= FIRST_DAF && startPage <= endPage && endPage <= tractate.total_pages
+    tractate !== null && startPage >= firstDaf && startPage <= endPage && endPage <= tractate.total_pages
   const totalDafim = rangeValid ? countDafim(startPage, endPage) : 0
   const rest = useMemo(
     () => ({ weekdays: restWeekdays, dates: restDates, holidays: restHolidays }),
@@ -169,21 +195,112 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
     }
   }, [rangeValid, paceMode, paceInput, startDate, targetDate, totalDafim, rest])
 
-  const stepErrors: Array<string | null> = [
-    tractateId === null ? 'יש לבחור מסכת' : programName.trim() === '' ? 'יש להזין שם לתוכנית' : null,
-    rangeValid ? null : 'טווח הלימוד אינו תקין',
-    restWeekdays.length >= 7 ? 'לא ניתן לסמן את כל ימי השבוע כימי מנוחה' : null,
-    'error' in plan ? plan.error : null,
-    null,
-  ]
-  const currentError = stepErrors[step]
-  const isLastStep = step === STEP_TITLES.length - 1
+  const dafYomiToday = useMemo(() => {
+    try {
+      return dafYomiOn(todayIso)
+    } catch {
+      return null
+    }
+  }, [todayIso])
+  const dafYomiTractateName = dafYomiTractate || dafYomiToday?.nameEn || ''
+  const dafYomiResult = useMemo(() => {
+    if (template !== 'daf_yomi') return { inputs: [] as ProgramInput[], error: null as string | null }
+    try {
+      return {
+        inputs: buildDafYomiInputs({
+          mode: dafYomiMode,
+          today: todayIso,
+          tractates,
+          nameEn: dafYomiMode === 'whole_shas' ? undefined : dafYomiTractateName,
+        }),
+        error: null,
+      }
+    } catch {
+      return { inputs: [] as ProgramInput[], error: 'לא ניתן לבנות תוכנית דף יומי: חסרות מסכתות ברשימה' }
+    }
+  }, [template, dafYomiMode, todayIso, tractates, dafYomiTractateName])
+
+  const stepErrors: Record<StepKey, string | null> = {
+    template: template === null ? 'יש לבחור תבנית' : template === 'daf_yomi' ? dafYomiResult.error : null,
+    tractate: tractateId === null ? 'יש לבחור מסכת' : programName.trim() === '' ? 'יש להזין שם לתוכנית' : null,
+    range: rangeValid ? null : 'טווח הלימוד אינו תקין',
+    rest: restWeekdays.length >= 7 ? 'לא ניתן לסמן את כל ימי השבוע כימי מנוחה' : null,
+    pace: 'error' in plan ? plan.error : null,
+    summary: null,
+  }
+  const stepKey = steps[step]
+  const currentError = stepErrors[stepKey]
+  const isLastStep = stepKey === 'summary'
+
+  function fillFromInput(input: ProgramInput) {
+    const target = tractates.find((item) => item.id === input.tractateId)
+    setTractateId(input.tractateId)
+    setProgramName(input.programName)
+    setNameTouched(true)
+    setRangeMode(
+      target && input.startPage === target.first_page && input.endPage === target.total_pages ? 'full' : 'custom',
+    )
+    setCustomStart(input.startPage)
+    setCustomEnd(input.endPage)
+    setStartDate(input.startDate)
+    setPaceMode(input.paceMode)
+    setPaceInput(String(input.pagesPerDay))
+    setTargetDate(input.targetEndDate)
+    setTargetTouched(false)
+    setRestWeekdays(input.restWeekdays)
+    setRestDates(input.restDates)
+    setRestHolidays(input.restHolidays)
+  }
+
+  function goNext() {
+    if (stepKey === 'template' && template === 'daf_yomi') {
+      if (dafYomiMode === 'whole_shas') {
+        setBatch(dafYomiResult.inputs)
+      } else {
+        setBatch(null)
+        fillFromInput(dafYomiResult.inputs[0])
+      }
+      setStep(steps.indexOf('summary'))
+      return
+    }
+    setStep(step + 1)
+  }
+
+  function goBack() {
+    if (isLastStep && batch) {
+      setBatch(null)
+      setStep(steps.indexOf('template'))
+      return
+    }
+    setStep(step - 1)
+  }
+
+  function chooseTemplate(next: Template) {
+    setTemplate(next)
+    if (next === 'tractate_month') {
+      setPaceMode('target_date')
+      setTargetDate(hebrewMonthEndDate(startDate))
+      setTargetTouched(false)
+    }
+  }
+
+  function changeStartDate(next: string) {
+    setStartDate(next)
+    if (template === 'tractate_month' && !targetTouched) {
+      setTargetDate(hebrewMonthEndDate(next))
+    }
+  }
+
+  function changeTargetDate(next: string) {
+    setTargetTouched(true)
+    setTargetDate(next)
+  }
 
   function chooseTractate(item: Tractate) {
     setTractateId(item.id)
     if (!nameTouched) setProgramName(`מסכת ${item.name_he}`)
     setRangeMode('full')
-    setCustomStart(FIRST_DAF)
+    setCustomStart(item.first_page)
     setCustomEnd(item.total_pages)
   }
 
@@ -201,7 +318,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   function chooseRangeMode(next: RangeMode) {
     setRangeMode(next)
     if (next === 'custom' && tractate) {
-      setCustomStart(FIRST_DAF)
+      setCustomStart(tractate.first_page)
       setCustomEnd(tractate.total_pages)
     }
   }
@@ -217,6 +334,19 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   }
 
   async function save() {
+    if (batch) {
+      setSaving(true)
+      setSaveError(null)
+      try {
+        const ids = await window.talmudonBridge.createPrograms(batch)
+        onSaved(ids[0])
+      } catch (error) {
+        console.error('Failed to save programs', error)
+        setSaveError('השמירה נכשלה, נסו שוב')
+        setSaving(false)
+      }
+      return
+    }
     if (!tractate || 'error' in plan) return
     const input: ProgramInput = {
       tractateId: tractate.id,
@@ -255,12 +385,109 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
     (item) => query === '' || item.name_he.includes(query) || item.name_en.toLowerCase().includes(query),
   )
   const selectablePages = pages.filter(
-    (page) => page.page_number >= FIRST_DAF && tractate && page.page_number <= tractate.total_pages,
+    (page) => page.page_number >= firstDaf && tractate && page.page_number <= tractate.total_pages,
   )
 
+  function renderTemplateStep(): ReactNode {
+    const todayTractate = tractates.find((item) => item.name_en === dafYomiToday?.nameEn)
+    const cycleTractates = tractates.filter((item) => CYCLE_NAMES.has(item.name_en))
+    const cards: Array<[Template, string, string]> = [
+      ['daf_yomi', 'דף יומי', 'לומדים כל יום את הדף של הסבב העולמי'],
+      ['tractate_month', 'מסכת בחודש', 'מסכת שלמה, עד אותו תאריך עברי בחודש הבא'],
+      ['custom', 'תוכנית מותאמת אישית', 'בוחרים בעצמכם מסכת, טווח וקצב'],
+    ]
+    return (
+      <div className="space-y-5">
+        <div className="grid gap-3 md:grid-cols-3">
+          {cards.map(([value, title, description]) => (
+            <button
+              key={value}
+              type="button"
+              aria-pressed={template === value}
+              onClick={() => chooseTemplate(value)}
+              className={`rounded-xl border px-4 py-4 text-start ${
+                template === value ? 'border-brand bg-brand-soft' : 'border-line bg-surface'
+              }`}
+            >
+              <span className="block font-semibold text-ink">{title}</span>
+              <span className="block text-sm text-muted">{description}</span>
+            </button>
+          ))}
+        </div>
+        {template === 'daf_yomi' && (
+          <div className="space-y-4">
+            {dafYomiToday && (
+              <p data-testid="daf-yomi-today" className="text-sm text-brand">
+                הדף היום: {todayTractate?.name_he ?? dafYomiToday.nameEn} {labelOf(dafYomiToday.page)}
+              </p>
+            )}
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm text-muted">מאיפה מתחילים?</legend>
+              {DAF_YOMI_MODES.map(([value, label]) => (
+                <label
+                  key={value}
+                  className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink has-[:checked]:border-brand has-[:checked]:bg-brand-soft"
+                >
+                  <input
+                    type="radio"
+                    name="daf-yomi-mode"
+                    checked={dafYomiMode === value}
+                    onChange={() => setDafYomiMode(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </fieldset>
+            {dafYomiMode !== 'whole_shas' && (
+              <label className="block space-y-1 text-sm text-muted">
+                <span>מסכת</span>
+                <select
+                  className={inputClass}
+                  value={dafYomiTractateName}
+                  onChange={(event) => setDafYomiTractate(event.target.value)}
+                >
+                  {cycleTractates.map((item) => (
+                    <option key={item.id} value={item.name_en}>
+                      {item.name_he}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  function renderBatchSummary(): ReactNode {
+    const first = batch?.[0]
+    const last = batch?.at(-1)
+    return (
+      <dl data-testid="program-summary" className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-sm">
+        <dt className="text-muted">תבנית</dt>
+        <dd className="text-ink">דף יומי – כל הש"ס</dd>
+        <dt className="text-muted">מספר תוכניות</dt>
+        <dd className="text-ink">{batch?.length}</dd>
+        {first && last && (
+          <>
+            <dt className="text-muted">תאריך התחלה</dt>
+            <dd className="text-ink">{formatIsoDate(first.startDate, calendarType)}</dd>
+            <dt className="text-muted">תאריך סיום</dt>
+            <dd className="text-ink">{formatIsoDate(last.targetEndDate, calendarType)}</dd>
+          </>
+        )}
+        <dt className="text-muted">קצב</dt>
+        <dd className="text-ink">{formatPace(1)}</dd>
+      </dl>
+    )
+  }
+
   function renderStep(): ReactNode {
-    switch (step) {
-      case 0:
+    switch (stepKey) {
+      case 'template':
+        return renderTemplateStep()
+      case 'tractate':
         return (
           <div className="space-y-5">
             <label className="block space-y-2 text-sm text-muted">
@@ -298,7 +525,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             </label>
           </div>
         )
-      case 1:
+      case 'range':
         return (
           <div className="space-y-5">
             <fieldset className="space-y-2">
@@ -359,7 +586,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             )}
           </div>
         )
-      case 2:
+      case 'rest':
         return (
           <div className="space-y-5">
             <fieldset className="space-y-2">
@@ -410,12 +637,12 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             </div>
           </div>
         )
-      case 3:
+      case 'pace':
         return (
           <div className="space-y-5">
             <div className="space-y-2 text-sm text-muted">
               <span className="block">תאריך התחלה</span>
-              <DateField label="תאריך התחלה" value={startDate} anchor={todayIso} onChange={setStartDate} />
+              <DateField label="תאריך התחלה" value={startDate} anchor={todayIso} onChange={changeStartDate} />
             </div>
             <fieldset className="space-y-2">
               <legend className="mb-2 text-sm text-muted">איך לקבוע את הקצב?</legend>
@@ -451,7 +678,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             ) : (
               <div className="space-y-2 text-sm text-muted">
                 <span className="block">תאריך יעד</span>
-                <DateField label="תאריך יעד" value={targetDate || startDate} anchor={todayIso} onChange={setTargetDate} />
+                <DateField label="תאריך יעד" value={targetDate || startDate} anchor={todayIso} onChange={changeTargetDate} />
                 <p data-testid="target-date-display" className="text-brand">
                   {formatIsoDate(targetDate || startDate, calendarType)}
                 </p>
@@ -468,7 +695,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
           </div>
         )
       default:
-        return (
+        return batch ? renderBatchSummary() : (
           <dl data-testid="program-summary" className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-sm">
             <dt className="text-muted">שם התוכנית</dt>
             <dd className="text-ink">{programName}</dd>
@@ -512,9 +739,9 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             {mode === 'edit' ? 'עריכת תוכנית לימוד' : 'יצירת תוכנית לימוד חדשה'}
           </h2>
           <ol className="flex flex-wrap items-center gap-3 text-sm">
-            {STEP_TITLES.map((title, index) => (
+            {steps.map((key, index) => (
               <li
-                key={title}
+                key={key}
                 aria-current={index === step ? 'step' : undefined}
                 className={`flex items-center gap-2 ${index === step ? 'font-semibold text-brand' : 'text-muted'}`}
               >
@@ -529,8 +756,8 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 >
                   {index + 1}
                 </span>
-                <span>{title}</span>
-                {index < STEP_TITLES.length - 1 && <span aria-hidden="true" className="h-px w-6 bg-line" />}
+                <span>{STEP_TITLES[key]}</span>
+                {index < steps.length - 1 && <span aria-hidden="true" className="h-px w-6 bg-line" />}
               </li>
             ))}
           </ol>
@@ -553,7 +780,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             {saveError}
           </p>
         )}
-        {loaded && currentError && step !== STEP_TITLES.length - 1 && (
+        {loaded && currentError && !isLastStep && (
           <p className="rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn">{currentError}</p>
         )}
 
@@ -562,14 +789,14 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             ביטול
           </button>
           <div className="flex gap-3">
-            <button type="button" className="btn-secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>
+            <button type="button" className="btn-secondary" disabled={step === 0} onClick={goBack}>
               הקודם
             </button>
             {isLastStep ? (
               <button
                 type="button"
                 className="btn-primary"
-                disabled={!loaded || saving || 'error' in plan}
+                disabled={!loaded || saving || (!batch && 'error' in plan)}
                 onClick={() => void save()}
               >
                 {mode === 'edit' ? 'עדכן תוכנית' : 'צור תוכנית'}
@@ -579,7 +806,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 type="button"
                 className="btn-primary"
                 disabled={!loaded || currentError !== null}
-                onClick={() => setStep(step + 1)}
+                onClick={goNext}
               >
                 הבא
               </button>

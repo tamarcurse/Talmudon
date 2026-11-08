@@ -56,6 +56,9 @@ ipcMain.handle('database:get-shas-pages', () => databaseService.getShasPages())
 ipcMain.handle('database:create-program', (_event, input: ProgramInput) =>
   databaseService.createProgram(input),
 )
+ipcMain.handle('database:create-programs', (_event, inputs: ProgramInput[]) =>
+  databaseService.createPrograms(inputs),
+)
 ipcMain.handle('database:update-program', (_event, id: number, input: ProgramInput) =>
   databaseService.updateProgram(id, input),
 )

@@ -45,12 +45,13 @@ describe('DatabaseService', () => {
     service.initialize()
 
     const tractates = service.getTractates()
-    expect(tractates).toHaveLength(37)
+    expect(tractates).toHaveLength(40)
     expect(tractates[0]).toMatchObject({
       id: 1,
       name_he: 'ברכות',
       name_en: 'Berakhot',
       total_pages: 64,
+      first_page: 2,
     })
     expect(service.getPageCount()).toBe(200)
     expect(service.getUserSetting('show_hebrew_dates')).toBe(false)
@@ -97,9 +98,9 @@ describe('DatabaseService', () => {
     service.initialize()
     service.initialize()
 
-    expect(service.getTractates()).toHaveLength(37)
+    expect(service.getTractates()).toHaveLength(40)
     expect(service.getPageCount()).toBe(200)
-    expect(service.getRowCount('tractates')).toBe(37)
+    expect(service.getRowCount('tractates')).toBe(40)
     expect(service.getRowCount('shas_pages')).toBe(200)
   })
 
@@ -992,5 +993,130 @@ describe('getStudyStats', () => {
     testServices.push(service)
     service.initialize()
     expect(service.getStudyStats('2026-11-08')).toEqual({ currentStreak: 0, pagesLast7Days: 0, pagesLast30Days: 0 })
+  })
+})
+
+describe('tractate data', () => {
+  function makeService(name: string) {
+    const service = new DatabaseService(createTestPath(name))
+    testServices.push(service)
+    return service.initialize()
+  }
+
+  const byName = (service: DatabaseService, nameEn: string) =>
+    service.getTractates().find((tractate) => tractate.name_en === nameEn)
+
+  it('seeds the page counts used by the daf yomi cycle', () => {
+    const service = makeService('tractate-data')
+    expect(byName(service, 'Shabbat')?.total_pages).toBe(157)
+    expect(byName(service, 'Eruvin')?.total_pages).toBe(105)
+    expect(byName(service, 'Pesachim')?.total_pages).toBe(121)
+    expect(byName(service, 'Taanit')?.total_pages).toBe(31)
+    expect(byName(service, 'Nedarim')?.total_pages).toBe(91)
+  })
+
+  it('includes Kinnim, Tamid and Middot with their own first page', () => {
+    const service = makeService('tractate-minor')
+    expect(byName(service, 'Kinnim')).toMatchObject({ name_he: 'קינים', first_page: 22, total_pages: 25 })
+    expect(byName(service, 'Tamid')).toMatchObject({ name_he: 'תמיד', first_page: 25, total_pages: 33 })
+    expect(byName(service, 'Middot')).toMatchObject({ name_he: 'מידות', first_page: 34, total_pages: 37 })
+    expect(byName(service, 'Berakhot')?.first_page).toBe(2)
+  })
+
+  it('rejects a range that starts before the first page of the tractate', () => {
+    const service = makeService('tractate-first-page')
+    const tamid = byName(service, 'Tamid')!
+    const input: ProgramInput = {
+      tractateId: tamid.id,
+      programName: 'תמיד',
+      startPage: 25,
+      endPage: 33,
+      startDate: '2026-11-08',
+      paceMode: 'daily_pace',
+      pagesPerDay: 1,
+      targetEndDate: '2026-11-16',
+      restWeekdays: [],
+      restDates: [],
+      restHolidays: [],
+    }
+    expect(() => service.createProgram({ ...input, startPage: 24 })).toThrow()
+    expect(() => service.createProgram(input)).not.toThrow()
+  })
+
+  it('repairs an old database in place without touching existing ids or programs', () => {
+    const dbPath = createTestPath('tractate-migration')
+    const first = new DatabaseService(dbPath)
+    testServices.push(first)
+    first.initialize()
+    const shabbatId = byName(first, 'Shabbat')!.id
+    const programId = first.createProgram({
+      tractateId: shabbatId,
+      programName: 'שבת',
+      startPage: 2,
+      endPage: 10,
+      startDate: '2026-11-08',
+      paceMode: 'daily_pace',
+      pagesPerDay: 1,
+      targetEndDate: '2026-11-16',
+      restWeekdays: [],
+      restDates: [],
+      restHolidays: [],
+    })
+    first.close()
+
+    const raw = new Database(dbPath)
+    raw.exec("UPDATE tractates SET total_pages = 156 WHERE name_en = 'Shabbat'")
+    raw.exec("UPDATE tractates SET total_pages = 104 WHERE name_en = 'Eruvin'")
+    raw.exec("DELETE FROM tractates WHERE name_en IN ('Kinnim', 'Tamid', 'Middot')")
+    raw.exec('ALTER TABLE tractates DROP COLUMN first_page')
+    raw.close()
+
+    const second = new DatabaseService(dbPath)
+    testServices.push(second)
+    second.initialize()
+
+    expect(second.getTractates()).toHaveLength(40)
+    expect(byName(second, 'Shabbat')).toMatchObject({ id: shabbatId, total_pages: 157, first_page: 2 })
+    expect(byName(second, 'Eruvin')?.total_pages).toBe(105)
+    expect(byName(second, 'Tamid')?.first_page).toBe(25)
+    expect(second.getProgram(programId)?.tractateId).toBe(shabbatId)
+  })
+})
+
+describe('createPrograms', () => {
+  const input = (tractateId: number, endPage: number): ProgramInput => ({
+    tractateId,
+    programName: `מסכת ${tractateId}`,
+    startPage: 2,
+    endPage,
+    startDate: '2026-11-08',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-20',
+    restWeekdays: [],
+    restDates: [],
+    restHolidays: [],
+  })
+
+  function makeService(name: string) {
+    const service = new DatabaseService(createTestPath(name))
+    testServices.push(service)
+    return service.initialize()
+  }
+
+  it('creates several programs with their schedules', () => {
+    const service = makeService('create-programs')
+    const ids = service.createPrograms([input(1, 4), input(2, 5), input(3, 6)])
+    expect(ids).toHaveLength(3)
+    expect(new Set(ids).size).toBe(3)
+    expect(service.getRowCount('study_programs')).toBe(3)
+    expect(service.getRowCount('page_progress')).toBe(3 + 4 + 5)
+  })
+
+  it('saves nothing when one of the programs is invalid', () => {
+    const service = makeService('create-programs-rollback')
+    expect(() => service.createPrograms([input(1, 4), input(2, 9999)])).toThrow()
+    expect(service.getRowCount('study_programs')).toBe(0)
+    expect(service.getRowCount('page_progress')).toBe(0)
   })
 })

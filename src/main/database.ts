@@ -24,7 +24,10 @@ export type TractateRecord = {
   id: number
   name_he: string
   name_en: string
+  /** Highest daf number of the tractate. */
   total_pages: number
+  /** First daf of the tractate (2 for most; later for Kinnim, Tamid, Middot). */
+  first_page: number
 }
 
 export type ShasPageRecord = {
@@ -122,6 +125,10 @@ const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = 
   { column: 'last_backup_at', definition: 'last_backup_at TEXT' },
 ]
 
+const TRACTATES_MIGRATIONS: Array<{ column: string; definition: string }> = [
+  { column: 'first_page', definition: 'first_page INTEGER NOT NULL DEFAULT 2' },
+]
+
 const PROGRAM_REST_DAYS_MIGRATIONS: Array<{ column: string; definition: string }> = [
   { column: 'holiday_id', definition: 'holiday_id TEXT' },
 ]
@@ -137,8 +144,6 @@ const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> =
 // A page (daf) is complete when all four parts are done; side/page completion is derived, not stored.
 const PAGE_COMPLETE_SQL =
   '(side_a_rashi AND side_a_tosafot AND side_b_rashi AND side_b_tosafot)'
-
-const MIN_PAGE_NUMBER = 2
 
 function pageRange(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, i) => start + i)
@@ -162,7 +167,8 @@ CREATE TABLE IF NOT EXISTS tractates (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name_he TEXT NOT NULL,
     name_en TEXT NOT NULL,
-    total_pages INTEGER NOT NULL
+    total_pages INTEGER NOT NULL,
+    first_page INTEGER NOT NULL DEFAULT 2
 );
 
 CREATE TABLE IF NOT EXISTS study_programs (
@@ -240,6 +246,7 @@ export class DatabaseService {
     this.migrateStudyPrograms()
     this.migratePageProgress()
     this.migrateCompletedPrograms()
+    this.applyColumnMigrations('tractates', TRACTATES_MIGRATIONS)
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -251,7 +258,7 @@ export class DatabaseService {
   }
 
   private applyColumnMigrations(
-    table: 'user_settings' | 'study_programs' | 'program_rest_days',
+    table: 'user_settings' | 'study_programs' | 'program_rest_days' | 'tractates',
     migrations: Array<{ column: string; definition: string }>,
   ): void {
     const db = this.ensureDatabase()
@@ -331,25 +338,29 @@ export class DatabaseService {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_study_programs_uid ON study_programs(uid)')
   }
 
+  // Upsert by English name: databases seeded by an older version carry wrong page counts and
+  // lack Kinnim, Tamid and Middot. Existing ids never change, so programs stay attached.
   private seedTractates(): void {
     const db = this.ensureDatabase()
-    const existing = db.prepare('SELECT COUNT(*) AS total FROM tractates').get() as { total: number }
-
-    if (existing.total > 0) {
-      return
-    }
-
+    const find = db.prepare('SELECT id FROM tractates WHERE name_en = ?')
     const insert = db.prepare(
-      `INSERT INTO tractates (name_he, name_en, total_pages) VALUES (@name_he, @name_en, @total_pages)`,
+      `INSERT INTO tractates (name_he, name_en, total_pages, first_page)
+       VALUES (@name_he, @name_en, @total_pages, @first_page)`,
+    )
+    const update = db.prepare(
+      `UPDATE tractates SET name_he = @name_he, total_pages = @total_pages, first_page = @first_page
+        WHERE name_en = @name_en`,
     )
 
-    const transaction = db.transaction(() => {
+    db.transaction(() => {
       for (const tractate of TRACTATES_SEED) {
-        insert.run(tractate)
+        if (find.get(tractate.name_en)) {
+          update.run(tractate)
+        } else {
+          insert.run(tractate)
+        }
       }
-    })
-
-    transaction()
+    })()
   }
 
   private seedShasPages(): void {
@@ -375,7 +386,7 @@ export class DatabaseService {
   getTractates(): TractateRecord[] {
     const db = this.ensureDatabase()
     return db
-      .prepare(`SELECT id, name_he, name_en, total_pages FROM tractates ORDER BY id ASC`)
+      .prepare(`SELECT id, name_he, name_en, total_pages, first_page FROM tractates ORDER BY id ASC`)
       .all() as TractateRecord[]
   }
 
@@ -394,8 +405,8 @@ export class DatabaseService {
     }
 
     const tractate = db
-      .prepare('SELECT total_pages FROM tractates WHERE id = ?')
-      .get(input.tractateId) as { total_pages: number } | undefined
+      .prepare('SELECT total_pages, first_page FROM tractates WHERE id = ?')
+      .get(input.tractateId) as { total_pages: number; first_page: number } | undefined
     if (!tractate) {
       throw new Error(`Unknown tractate: ${String(input.tractateId)}`)
     }
@@ -403,9 +414,9 @@ export class DatabaseService {
     if (!Number.isInteger(input.startPage) || !Number.isInteger(input.endPage)) {
       throw new Error('Start and end pages must be integers')
     }
-    if (input.startPage < MIN_PAGE_NUMBER || input.startPage > input.endPage || input.endPage > tractate.total_pages) {
+    if (input.startPage < tractate.first_page || input.startPage > input.endPage || input.endPage > tractate.total_pages) {
       throw new Error(
-        `Invalid page range ${input.startPage}-${input.endPage}; must satisfy ${MIN_PAGE_NUMBER} <= start <= end <= ${tractate.total_pages}`,
+        `Invalid page range ${input.startPage}-${input.endPage}; must satisfy ${tractate.first_page} <= start <= end <= ${tractate.total_pages}`,
       )
     }
 
@@ -464,36 +475,42 @@ export class DatabaseService {
     }
   }
 
-  createProgram(input: ProgramInput): number {
-    this.validateProgramInput(input)
+  private insertProgram(input: ProgramInput): number {
     const db = this.ensureDatabase()
+    const result = db
+      .prepare(
+        `INSERT INTO study_programs
+           (tractate_id, program_name, start_page_num, end_page_num, target_end_date,
+            pages_per_day, start_date, pace_mode, uid)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.tractateId,
+        input.programName.trim(),
+        input.startPage,
+        input.endPage,
+        input.targetEndDate,
+        input.pagesPerDay,
+        input.startDate,
+        input.paceMode,
+        randomUUID(),
+      )
+    const programId = Number(result.lastInsertRowid)
+    this.replaceRestDays(programId, input)
+    this.insertInitialPageProgress(programId, input)
+    return programId
+  }
 
-    const save = db.transaction(() => {
-      const result = db
-        .prepare(
-          `INSERT INTO study_programs
-             (tractate_id, program_name, start_page_num, end_page_num, target_end_date,
-              pages_per_day, start_date, pace_mode, uid)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(
-          input.tractateId,
-          input.programName.trim(),
-          input.startPage,
-          input.endPage,
-          input.targetEndDate,
-          input.pagesPerDay,
-          input.startDate,
-          input.paceMode,
-          randomUUID(),
-        )
-      const programId = Number(result.lastInsertRowid)
-      this.replaceRestDays(programId, input)
-      this.insertInitialPageProgress(programId, input)
-      return programId
-    })
+  createProgram(input: ProgramInput): number {
+    return this.createPrograms([input])[0]
+  }
 
-    return save()
+  /** Creates every program in one transaction: if any input is invalid, none is saved. */
+  createPrograms(inputs: ProgramInput[]): number[] {
+    for (const input of inputs) {
+      this.validateProgramInput(input)
+    }
+    return this.ensureDatabase().transaction(() => inputs.map((input) => this.insertProgram(input)))()
   }
 
   updateProgram(id: number, input: ProgramInput, today: string = localToday()): void {

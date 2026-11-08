@@ -14,10 +14,12 @@ import type { StudyStats } from '../main/stats'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitFlags, type UnitTarget } from '../main/progress'
 
 export const TRACTATES_FIXTURE = [
-  { id: 1, name_he: 'ברכות', name_en: 'Berakhot', total_pages: 64 },
-  { id: 2, name_he: 'שבת', name_en: 'Shabbat', total_pages: 157 },
-  { id: 3, name_he: 'עירובין', name_en: 'Eruvin', total_pages: 105 },
-  { id: 4, name_he: 'פסחים', name_en: 'Pesachim', total_pages: 121 },
+  { id: 1, name_he: 'ברכות', name_en: 'Berakhot', total_pages: 64, first_page: 2 },
+  { id: 2, name_he: 'שבת', name_en: 'Shabbat', total_pages: 157, first_page: 2 },
+  { id: 3, name_he: 'עירובין', name_en: 'Eruvin', total_pages: 105, first_page: 2 },
+  { id: 4, name_he: 'פסחים', name_en: 'Pesachim', total_pages: 121, first_page: 2 },
+  { id: 5, name_he: 'תמיד', name_en: 'Tamid', total_pages: 33, first_page: 25 },
+  { id: 6, name_he: 'בכורות', name_en: 'Bechorot', total_pages: 61, first_page: 2 },
 ]
 
 export function buildPagesFixture(lastPage = 200): ShasPageRecord[] {
@@ -51,6 +53,8 @@ export type MockBridgeOptions = {
   /** Program returned by getProgram (edit mode). */
   program?: ProgramRecord | null
   createdProgramId?: number
+  /** Ids returned by createPrograms (default: 1, 2, 3, …). */
+  createdProgramIds?: number[]
   /** Summaries returned by listProgramSummaries (dashboard). */
   summaries?: ProgramSummary[]
   /** Schedule rows returned by getPageProgress (stateful: setUnitsCompleted updates them). */
@@ -115,6 +119,9 @@ export function mockBridge(options: MockBridgeOptions = {}) {
     getShasPages: vi.fn().mockResolvedValue(options.pages ?? buildPagesFixture()),
     getProgram: vi.fn(async () => program),
     createProgram: vi.fn<(input: ProgramInput) => Promise<number>>().mockResolvedValue(options.createdProgramId ?? 1),
+    createPrograms: vi
+      .fn<(inputs: ProgramInput[]) => Promise<number[]>>()
+      .mockImplementation(async (inputs) => options.createdProgramIds ?? inputs.map((_, index) => index + 1)),
     recalculateProgram: vi.fn(async () => {
       if (options.progressAfterRecalc) progress = options.progressAfterRecalc
     }),

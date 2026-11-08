@@ -98,7 +98,7 @@ describe('App', () => {
     renderApp()
 
     fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
-    await screen.findByLabelText('חיפוש מסכת')
+    await screen.findByText('יצירת תוכנית לימוד חדשה')
 
     fireEvent.click(screen.getByRole('button', button))
     expect(screen.getByRole('dialog', { name: 'לצאת בלי לשמור?' })).toBeInTheDocument()
@@ -122,7 +122,7 @@ describe('App', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
 
-    expect(await screen.findByLabelText('חיפוש מסכת')).toBeInTheDocument()
+    expect(await screen.findByText('יצירת תוכנית לימוד חדשה')).toBeInTheDocument()
     expect(bridge.getProgram).not.toHaveBeenCalled()
   })
 
@@ -193,14 +193,14 @@ describe('App', () => {
     renderApp()
 
     fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
-    await screen.findByLabelText('חיפוש מסכת')
+    await screen.findByText('יצירת תוכנית לימוד חדשה')
 
     fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
     expect(screen.getByRole('dialog', { name: 'לצאת בלי לשמור?' })).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'המשך עריכה' }))
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    expect(screen.getByLabelText('חיפוש מסכת')).toBeInTheDocument()
+    expect(screen.getByText('יצירת תוכנית לימוד חדשה')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
     fireEvent.click(screen.getByRole('button', { name: 'יציאה' }))

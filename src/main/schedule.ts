@@ -5,10 +5,10 @@ import { holidayLeavesOnDate } from './holidays.js'
 
 export type RestRules = { weekdays: number[]; dates: string[]; holidays?: string[] }
 
-const DAY_MS = 24 * 60 * 60 * 1000
+export const DAY_MS = 24 * 60 * 60 * 1000
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
 
-function parseIso(iso: string): number {
+export function parseIso(iso: string): number {
   const match = ISO_DATE.exec(iso)
   if (!match) {
     throw new Error(`Invalid ISO date: ${iso}`)
@@ -21,7 +21,7 @@ function parseIso(iso: string): number {
   return time
 }
 
-function toIso(time: number): string {
+export function toIso(time: number): string {
   return new Date(time).toISOString().slice(0, 10)
 }
 
