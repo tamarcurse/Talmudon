@@ -47,6 +47,22 @@ npm run build
 npm test
 ```
 
+## בניית קובץ התקנה
+
+הבנייה עובדת ללא גישה ל-GitHub. בפעם הראשונה יש להוריד ידנית (ממחשב עם גישה) את הקבצים הבאים
+ולשים אותם בתיקייה `downloads/electron-builder-binaries/` (עם אותה מבנה תיקיות):
+
+- `nsis-3.0.4.1/nsis-3.0.4.1.7z`
+- `nsis-resources-3.4.1/nsis-resources-3.4.1.7z`
+- `winCodeSign-2.6.0/winCodeSign-2.6.0.7z`
+- `icons@1.2.3/icons-bundle.tar.gz`
+- `7zip@1.0.0/7zip-win-x64.tar.gz`
+
+כתובת ההורדה: `https://github.com/electron-userland/electron-builder-binaries/releases/download/<תיקייה>/<קובץ>`
+
+לאחר מכן מריצים `build-installer.cmd` (או `npm run dist:win`). התוצאה: `release/Talmudon-Setup-<גרסה>.exe`.
+ההתקנה עצמה לא דורשת אינטרנט, והנתונים נשמרים ב-`%APPDATA%\Talmudon`.
+
 ## Requirements
 
 - Offline first: the app opens without network dependency.

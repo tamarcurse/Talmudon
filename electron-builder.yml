@@ -1,0 +1,35 @@
+appId: com.talmudon.app
+productName: Talmudon
+directories:
+  output: release
+electronDist: node_modules/electron/dist
+compression: maximum
+electronLanguages:
+  - he
+  - en-US
+npmRebuild: false
+nodeGypRebuild: false
+files:
+  - dist/**
+  - dist-electron/**
+  - build/icon.png
+  - package.json
+  - "!dist-electron/**/*.test.js"
+asarUnpack:
+  - "**/*.node"
+win:
+  target:
+    - target: nsis
+      arch: x64
+  icon: build/icon.png
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  installerLanguages:
+    - he_IL
+  language: "1037"
+  shortcutName: תלמודון
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  artifactName: Talmudon-Setup-${version}.exe
