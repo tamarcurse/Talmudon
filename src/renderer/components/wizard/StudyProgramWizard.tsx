@@ -12,7 +12,7 @@ type ShasPage = { page_number: number; page_label_he: string }
 type RangeMode = 'full' | 'custom'
 
 const FIRST_DAF = 2
-const STEP_TITLES = ['מסכת', 'טווח', 'קצב', 'ימי מנוחה', 'סיכום']
+const STEP_TITLES = ['מסכת', 'טווח', 'ימי מנוחה', 'קצב', 'סיכום']
 const WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
 
 const inputClass = 'field'
@@ -172,8 +172,8 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   const stepErrors: Array<string | null> = [
     tractateId === null ? 'יש לבחור מסכת' : programName.trim() === '' ? 'יש להזין שם לתוכנית' : null,
     rangeValid ? null : 'טווח הלימוד אינו תקין',
+    restWeekdays.length >= 7 ? 'לא ניתן לסמן את כל ימי השבוע כימי מנוחה' : null,
     'error' in plan ? plan.error : null,
-    restWeekdays.length >= 7 ? 'לא ניתן לסמן את כל ימי השבוע כימי מנוחה' : 'error' in plan ? plan.error : null,
     null,
   ]
   const currentError = stepErrors[step]
@@ -362,6 +362,57 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
       case 2:
         return (
           <div className="space-y-5">
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm text-muted">ימי מנוחה קבועים</legend>
+              <div className="flex flex-wrap gap-4">
+                {WEEKDAY_NAMES.map((name, day) => (
+                  <label key={name} className="flex items-center gap-2 text-sm text-ink">
+                    <input
+                      type="checkbox"
+                      checked={restWeekdays.includes(day)}
+                      onChange={() => toggleWeekday(day)}
+                    />
+                    {name}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset className="space-y-2">
+              <legend className="mb-2 text-sm text-muted">חגים ומועדים</legend>
+              <HolidayPicker selected={restHolidays} onChange={setRestHolidays} fromIso={startDate} />
+            </fieldset>
+            <div className="space-y-2 text-sm text-muted">
+              <span className="block">תאריכי מנוחה מיוחדים (חגים, אירועים)</span>
+              <div className="flex flex-wrap items-center gap-3">
+                <DateField label="תאריך מנוחה" value={pendingRestDate} anchor={todayIso} onChange={setPendingRestDate} />
+                <button type="button" className="btn-secondary" onClick={addRestDate}>
+                  הוסף תאריך
+                </button>
+              </div>
+              <ul className="space-y-1">
+                {restDates.map((date) => {
+                  const text = formatIsoDate(date, calendarType)
+                  return (
+                    <li key={date} className="flex items-center gap-3 text-ink">
+                      <span>{text}</span>
+                      <button
+                        type="button"
+                        aria-label={`הסר ${text}`}
+                        className="text-xs text-danger hover:underline"
+                        onClick={() => setRestDates((current) => current.filter((item) => item !== date))}
+                      >
+                        הסר
+                      </button>
+                    </li>
+                  )
+                })}
+              </ul>
+            </div>
+          </div>
+        )
+      case 3:
+        return (
+          <div className="space-y-5">
             <div className="space-y-2 text-sm text-muted">
               <span className="block">תאריך התחלה</span>
               <DateField label="תאריך התחלה" value={startDate} anchor={todayIso} onChange={setStartDate} />
@@ -414,57 +465,6 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 </p>
               </div>
             )}
-          </div>
-        )
-      case 3:
-        return (
-          <div className="space-y-5">
-            <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm text-muted">ימי מנוחה קבועים</legend>
-              <div className="flex flex-wrap gap-4">
-                {WEEKDAY_NAMES.map((name, day) => (
-                  <label key={name} className="flex items-center gap-2 text-sm text-ink">
-                    <input
-                      type="checkbox"
-                      checked={restWeekdays.includes(day)}
-                      onChange={() => toggleWeekday(day)}
-                    />
-                    {name}
-                  </label>
-                ))}
-              </div>
-            </fieldset>
-            <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm text-muted">חגים ומועדים</legend>
-              <HolidayPicker selected={restHolidays} onChange={setRestHolidays} fromIso={startDate} />
-            </fieldset>
-            <div className="space-y-2 text-sm text-muted">
-              <span className="block">תאריכי מנוחה מיוחדים (חגים, אירועים)</span>
-              <div className="flex flex-wrap items-center gap-3">
-                <DateField label="תאריך מנוחה" value={pendingRestDate} anchor={todayIso} onChange={setPendingRestDate} />
-                <button type="button" className="btn-secondary" onClick={addRestDate}>
-                  הוסף תאריך
-                </button>
-              </div>
-              <ul className="space-y-1">
-                {restDates.map((date) => {
-                  const text = formatIsoDate(date, calendarType)
-                  return (
-                    <li key={date} className="flex items-center gap-3 text-ink">
-                      <span>{text}</span>
-                      <button
-                        type="button"
-                        aria-label={`הסר ${text}`}
-                        className="text-xs text-danger hover:underline"
-                        onClick={() => setRestDates((current) => current.filter((item) => item !== date))}
-                      >
-                        הסר
-                      </button>
-                    </li>
-                  )
-                })}
-              </ul>
-            </div>
           </div>
         )
       default:

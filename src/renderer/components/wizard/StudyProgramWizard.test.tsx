@@ -161,13 +161,14 @@ describe('Step 2: range', () => {
   })
 })
 
-describe('Step 3: pace', () => {
+describe('Step 4: pace', () => {
   async function toPaceStep() {
     const rendered = await renderWizard()
     pickTractate('ברכות')
     next()
     chooseRadio('מסכת שלמה')
     next()
+    next() // rest days
     return rendered
   }
 
@@ -200,6 +201,7 @@ describe('Step 3: pace', () => {
     next()
     chooseRadio('מסכת שלמה')
     next()
+    next() // rest days
     chooseRadio('לפי תאריך יעד')
 
     // 24 Kislev 5787 = 2026-12-04 (the day before the first day of Chanukah).
@@ -209,7 +211,6 @@ describe('Step 3: pace', () => {
     fireEvent.change(screen.getByLabelText('תאריך יעד – יום'), { target: { value: '24' } })
 
     expect(screen.getByTestId('target-date-display')).toHaveTextContent('כ״ד כסלו תשפ״ז')
-    next() // rest days
     next() // summary
     fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
 
@@ -231,17 +232,83 @@ describe('Step 3: pace', () => {
   })
 })
 
-describe('Step 4 and 5: rest days and summary', () => {
+describe('wizard order: rest days before pace', () => {
+  it('step 3 is rest days and step 4 is pace', async () => {
+    await renderWizard()
+    pickTractate('ברכות')
+    next()
+    next()
+
+    expect(screen.getByRole('checkbox', { name: 'שבת' })).toBeInTheDocument()
+    expect(screen.queryByLabelText('דפים ביום')).not.toBeInTheDocument()
+
+    next()
+
+    expect(screen.getByLabelText('דפים ביום')).toBeInTheDocument()
+  })
+
+  it('the pace preview already counts the rest days chosen before it', async () => {
+    const { bridge } = await renderWizard()
+    pickTractate('ברכות')
+    next()
+    next()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'שבת' }))
+    next()
+    fireEvent.change(screen.getByLabelText('דפים ביום'), { target: { value: '1' } })
+
+    expect(screen.getByTestId('end-date-summary')).toHaveTextContent('19 בינואר 2027')
+
+    next()
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('19 בינואר 2027')
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+
+    await waitFor(() => expect(bridge.createProgram).toHaveBeenCalledTimes(1))
+    expect(bridge.createProgram.mock.calls[0][0].targetEndDate).toBe('2027-01-19')
+  })
+
+  it('a holiday ticked before the pace step moves the previewed end date', async () => {
+    await renderWizard()
+    pickTractate('ברכות')
+    next()
+    next()
+    next()
+    const without = screen.getByTestId('end-date-summary').textContent
+    previous()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'חנוכה' }))
+    next()
+
+    expect(screen.getByTestId('end-date-summary').textContent).not.toBe(without)
+  })
+
+  it('the default target date already accounts for rest days', async () => {
+    await renderWizard()
+    pickTractate('ברכות')
+    next()
+    next()
+    fireEvent.click(screen.getByRole('checkbox', { name: 'שבת' }))
+    next()
+
+    chooseRadio('לפי תאריך יעד')
+
+    expect(screen.getByTestId('target-date-display')).toHaveTextContent('19 בינואר 2027')
+  })
+})
+
+describe('Step 3 and 5: rest days and summary', () => {
   async function toRestStep() {
     const rendered = await renderWizard()
     pickTractate('ברכות')
     next()
     chooseRadio('מסכת שלמה')
     next()
-    chooseRadio('לפי קצב יומי')
-    fireEvent.change(screen.getByLabelText('דפים ביום'), { target: { value: '1' } })
-    next()
     return rendered
+  }
+
+  // Passes the rest step and the pace step (default: 1 page per day) to reach the summary.
+  function toSummary() {
+    next() // rest days -> pace
+    next() // pace -> summary
   }
 
   it('weekday and specific rest days reach createProgram', async () => {
@@ -251,7 +318,7 @@ describe('Step 4 and 5: rest days and summary', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: 'שבת' }))
     setDate('תאריך מנוחה', '2026-12-25')
     fireEvent.click(screen.getByRole('button', { name: 'הוסף תאריך' }))
-    next()
+    toSummary()
     fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
 
     await waitFor(() => expect(bridge.createProgram).toHaveBeenCalledTimes(1))
@@ -266,7 +333,7 @@ describe('Step 4 and 5: rest days and summary', () => {
     fireEvent.click(screen.getByRole('button', { name: 'הוסף תאריך' }))
 
     fireEvent.click(screen.getByRole('button', { name: /הסר/ }))
-    next()
+    toSummary()
     fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
 
     await waitFor(() => expect(bridge.createProgram).toHaveBeenCalled())
@@ -275,12 +342,13 @@ describe('Step 4 and 5: rest days and summary', () => {
 
   it('ticking Chanukah moves the end date and reaches createProgram', async () => {
     const { bridge } = await toRestStep()
-    next()
+    toSummary()
     const before = screen.getByTestId('program-summary').textContent
+    previous()
     previous()
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'חנוכה' }))
-    next()
+    toSummary()
 
     expect(screen.getByTestId('program-summary').textContent).not.toBe(before)
     expect(screen.getByTestId('program-summary')).toHaveTextContent('חגים')
@@ -307,13 +375,13 @@ describe('Step 4 and 5: rest days and summary', () => {
     expect(group.checked).toBe(false)
     expect(group.indeterminate).toBe(true)
 
-    next()
+    toSummary()
     expect(screen.getByTestId('program-summary')).toHaveTextContent('פסח (יום טוב ראשון, שביעי של פסח)')
   })
 
   it('summary says אין when no holidays are chosen', async () => {
     await toRestStep()
-    next()
+    toSummary()
     const dt = screen.getByText('חגים')
     expect(dt.nextElementSibling).toHaveTextContent('אין')
   })
@@ -331,7 +399,7 @@ describe('Step 4 and 5: rest days and summary', () => {
   it('summary shows tractate, Hebrew range, pace and end date, and saves the full input', async () => {
     const { bridge, onSaved } = await toRestStep()
     fireEvent.click(screen.getByRole('checkbox', { name: 'שבת' }))
-    next()
+    toSummary()
 
     const summary = screen.getByTestId('program-summary')
     expect(summary).toHaveTextContent('ברכות')
@@ -361,7 +429,7 @@ describe('Step 4 and 5: rest days and summary', () => {
   it('shows an error and stays on the page when saving fails', async () => {
     const { bridge, onSaved } = await toRestStep()
     bridge.createProgram.mockRejectedValueOnce(new Error('boom'))
-    next()
+    toSummary()
 
     fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
 
@@ -401,16 +469,16 @@ describe('edit mode', () => {
     expect((screen.getByLabelText('עד דף') as HTMLSelectElement).value).toBe('30')
     next()
 
-    // Step 3: target-date mode and date restored
-    expect(screen.getByRole('radio', { name: 'לפי תאריך יעד' })).toBeChecked()
-    expect((screen.getByLabelText('תאריך יעד') as HTMLInputElement).value).toBe('2026-12-20')
-    next()
-
-    // Step 4: rest days restored
+    // Step 3: rest days restored
     expect(screen.getByRole('checkbox', { name: 'שישי' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'שבת' })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: 'ראשון' })).not.toBeChecked()
     expect(screen.getByText('1 בדצמבר 2026')).toBeInTheDocument()
+    next()
+
+    // Step 4: target-date mode and date restored
+    expect(screen.getByRole('radio', { name: 'לפי תאריך יעד' })).toBeChecked()
+    expect((screen.getByLabelText('תאריך יעד') as HTMLInputElement).value).toBe('2026-12-20')
     next()
 
     // Step 5
@@ -444,7 +512,6 @@ describe('edit mode', () => {
     })
     next()
     next()
-    next()
 
     expect(screen.getByRole('checkbox', { name: 'פורים' })).toBeChecked()
   })
@@ -455,6 +522,7 @@ describe('edit mode', () => {
       programId: 7,
       program: { ...program, paceMode: 'daily_pace', pagesPerDay: 2, restWeekdays: [], restDates: [] },
     })
+    next()
     next()
     next()
 
