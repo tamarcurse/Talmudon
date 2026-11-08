@@ -1,6 +1,18 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import type { BackupFile, BackupPreview, BackupProgram, MergeResult } from './backup.js'
+import { BACKUP_FORMAT, BACKUP_VERSION } from './backup.js'
+import { isValidIsoDate } from './dates.js'
+import {
+  CALENDAR_TYPES,
+  PACE_MODES,
+  SETTABLE_PROGRAM_STATUSES,
+  type CalendarType,
+  type PaceMode,
+  type SettableProgramStatus,
+} from './domain.js'
 import { isHolidayId } from './holidays.js'
 import { computeProgramMetrics, type ProgramMetrics } from './metrics.js'
 import { UNIT_KEYS, isPageComplete, isUnitKey, type UnitFlags, type UnitTarget } from './progress.js'
@@ -32,8 +44,8 @@ export type StudyProgramRecord = {
   created_at: string | null
 }
 
-export const PACE_MODES = ['target_date', 'daily_pace'] as const
-export type PaceMode = (typeof PACE_MODES)[number]
+export { PACE_MODES, CALENDAR_TYPES, SETTABLE_PROGRAM_STATUSES }
+export type { PaceMode, CalendarType, SettableProgramStatus }
 
 export type ProgramInput = {
   tractateId: number
@@ -56,9 +68,8 @@ export type ProgramRecord = ProgramInput & {
 }
 
 /** Statuses a caller may set by hand; `completed` is reached only by marking the last unit. */
-export const SETTABLE_PROGRAM_STATUSES = ['active', 'paused'] as const
-export type SettableProgramStatus = (typeof SETTABLE_PROGRAM_STATUSES)[number]
 export type ProgramStatus = SettableProgramStatus | 'completed'
+const PROGRAM_STATUSES: readonly string[] = [...SETTABLE_PROGRAM_STATUSES, 'completed']
 
 export type ProgramSummary = ProgramMetrics & {
   id: number
@@ -100,8 +111,6 @@ const ALLOWED_TABLE_NAMES = new Set([
 
 const ALLOWED_USER_SETTING_NAMES = new Set(['show_hebrew_dates', 'calendar_type'])
 
-export const CALENDAR_TYPES = ['gregorian', 'hebrew'] as const
-export type CalendarType = (typeof CALENDAR_TYPES)[number]
 
 const USER_SETTING_VALIDATORS: Record<string, (value: unknown) => boolean> = {
   show_hebrew_dates: (value) => typeof value === 'boolean',
@@ -110,6 +119,7 @@ const USER_SETTING_VALIDATORS: Record<string, (value: unknown) => boolean> = {
 
 const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = [
   { column: 'calendar_type', definition: "calendar_type TEXT NOT NULL DEFAULT 'gregorian'" },
+  { column: 'last_backup_at', definition: 'last_backup_at TEXT' },
 ]
 
 const PROGRAM_REST_DAYS_MIGRATIONS: Array<{ column: string; definition: string }> = [
@@ -121,6 +131,7 @@ const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> =
   { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
   { column: 'paused_at', definition: 'paused_at TEXT' },
   { column: 'completed_at', definition: 'completed_at TEXT' },
+  { column: 'uid', definition: 'uid TEXT' },
 ]
 
 // A page (daf) is complete when all four parts are done; side/page completion is derived, not stored.
@@ -128,7 +139,6 @@ const PAGE_COMPLETE_SQL =
   '(side_a_rashi AND side_a_tosafot AND side_b_rashi AND side_b_tosafot)'
 
 const MIN_PAGE_NUMBER = 2
-const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
 
 function pageRange(start: number, end: number): number[] {
   return Array.from({ length: end - start + 1 }, (_, i) => start + i)
@@ -138,18 +148,6 @@ function localToday(): string {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
-}
-
-function isValidIsoDate(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false
-  }
-  const match = ISO_DATE_PATTERN.exec(value)
-  if (!match) {
-    return false
-  }
-  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
-  return date.toISOString().slice(0, 10) === value
 }
 
 const SCHEMA_SQL = `
@@ -317,6 +315,20 @@ export class DatabaseService {
   private migrateStudyPrograms(): void {
     this.applyColumnMigrations('study_programs', STUDY_PROGRAMS_MIGRATIONS)
     this.applyColumnMigrations('program_rest_days', PROGRAM_REST_DAYS_MIGRATIONS)
+    this.backfillProgramUids()
+  }
+
+  // Stable ids let a backup recognise a program it already contains, whatever its local row id.
+  private backfillProgramUids(): void {
+    const db = this.ensureDatabase()
+    const rows = db.prepare('SELECT id FROM study_programs WHERE uid IS NULL').all() as Array<{ id: number }>
+    const setUid = db.prepare('UPDATE study_programs SET uid = ? WHERE id = ?')
+    db.transaction(() => {
+      for (const row of rows) {
+        setUid.run(randomUUID(), row.id)
+      }
+    })()
+    db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_study_programs_uid ON study_programs(uid)')
   }
 
   private seedTractates(): void {
@@ -461,8 +473,8 @@ export class DatabaseService {
         .prepare(
           `INSERT INTO study_programs
              (tractate_id, program_name, start_page_num, end_page_num, target_end_date,
-              pages_per_day, start_date, pace_mode)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+              pages_per_day, start_date, pace_mode, uid)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           input.tractateId,
@@ -473,6 +485,7 @@ export class DatabaseService {
           input.pagesPerDay,
           input.startDate,
           input.paceMode,
+          randomUUID(),
         )
       const programId = Number(result.lastInsertRowid)
       this.replaceRestDays(programId, input)
@@ -857,6 +870,173 @@ export class DatabaseService {
       if (status === 'active') {
         this.recalculateInTransaction(id, today)
       }
+    })()
+  }
+
+  getLastBackupAt(): string | null {
+    const row = this.ensureDatabase().prepare('SELECT last_backup_at FROM user_settings WHERE id = 1').get() as
+      | { last_backup_at: string | null }
+      | undefined
+    return row?.last_backup_at ?? null
+  }
+
+  markBackupExported(at: string): void {
+    if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) {
+      throw new Error(`Invalid backup timestamp: ${String(at)}`)
+    }
+    this.ensureDatabase().prepare('UPDATE user_settings SET last_backup_at = ? WHERE id = 1').run(at)
+  }
+
+  /** Everything the user created (programs, progress, rest days, settings); seed tables are not included. */
+  exportBackup(exportedAt: string = new Date().toISOString()): BackupFile {
+    const db = this.ensureDatabase()
+    const rows = db
+      .prepare('SELECT id, uid, paused_at, created_at FROM study_programs ORDER BY id ASC')
+      .all() as Array<{ id: number; uid: string; paused_at: string | null; created_at: string | null }>
+    const tractateNames = new Map(this.getTractates().map((t) => [t.id, t.name_en]))
+
+    const programs = rows.map((row): BackupProgram => {
+      const program = this.getProgram(row.id) as ProgramRecord
+      return {
+        uid: row.uid,
+        tractateId: program.tractateId,
+        tractateNameEn: tractateNames.get(program.tractateId) ?? '',
+        programName: program.programName,
+        startPage: program.startPage,
+        endPage: program.endPage,
+        startDate: program.startDate,
+        paceMode: program.paceMode,
+        pagesPerDay: program.pagesPerDay,
+        targetEndDate: program.targetEndDate,
+        status: program.status,
+        pausedAt: row.paused_at,
+        completedAt: program.completedAt,
+        createdAt: row.created_at,
+        restWeekdays: program.restWeekdays,
+        restDates: program.restDates,
+        restHolidays: program.restHolidays,
+        pages: this.getPageProgress(row.id).map((page) => ({
+          pageNumber: page.pageNumber,
+          scheduledDate: page.scheduledDate,
+          units: page.units,
+          completedAt: page.completedAt,
+        })),
+      }
+    })
+
+    return {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt,
+      settings: {
+        calendarType: (this.getUserSetting<CalendarType>('calendar_type') ?? 'gregorian') as CalendarType,
+        showHebrewDates: Boolean(this.getUserSetting('show_hebrew_dates')),
+      },
+      programs,
+    }
+  }
+
+  private existingProgramUids(): Set<string> {
+    const rows = this.ensureDatabase().prepare('SELECT uid FROM study_programs').all() as Array<{ uid: string }>
+    return new Set(rows.map((row) => row.uid))
+  }
+
+  previewBackup(backup: BackupFile): BackupPreview {
+    const existing = this.existingProgramUids()
+    const existingPrograms = backup.programs.filter((program) => existing.has(program.uid)).length
+    return {
+      total: backup.programs.length,
+      newPrograms: backup.programs.length - existingPrograms,
+      existingPrograms,
+    }
+  }
+
+  /**
+   * Adds the programs of a backup next to the existing ones. Programs whose uid is already present are
+   * skipped and local settings are kept. Rows are stored as exported, so schedules are not recalculated.
+   * Any invalid program rolls the whole merge back.
+   */
+  mergeBackup(backup: BackupFile): MergeResult {
+    const db = this.ensureDatabase()
+    const insertProgram = db.prepare(
+      `INSERT INTO study_programs
+         (tractate_id, program_name, start_page_num, end_page_num, target_end_date, pages_per_day,
+          start_date, pace_mode, status, paused_at, completed_at, created_at, uid)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)`,
+    )
+    const insertPage = db.prepare(
+      `INSERT INTO page_progress
+         (program_id, page_number, scheduled_date, side_a_rashi, side_a_tosafot, side_b_rashi,
+          side_b_tosafot, completed_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    )
+
+    return db.transaction((): MergeResult => {
+      const existing = this.existingProgramUids()
+      let added = 0
+      let skipped = 0
+      for (const program of backup.programs) {
+        if (existing.has(program.uid)) {
+          skipped += 1
+          continue
+        }
+        const tractate = db.prepare('SELECT name_en FROM tractates WHERE id = ?').get(program.tractateId) as
+          | { name_en: string }
+          | undefined
+        if (!tractate || tractate.name_en !== program.tractateNameEn) {
+          throw new Error(`Tractate mismatch for program "${program.programName}"`)
+        }
+        if (!PROGRAM_STATUSES.includes(program.status)) {
+          throw new Error(`Invalid program status: ${String(program.status)}`)
+        }
+        const input: ProgramInput = {
+          tractateId: program.tractateId,
+          programName: program.programName,
+          startPage: program.startPage,
+          endPage: program.endPage,
+          startDate: program.startDate,
+          paceMode: program.paceMode,
+          pagesPerDay: program.pagesPerDay,
+          targetEndDate: program.targetEndDate,
+          restWeekdays: program.restWeekdays,
+          restDates: program.restDates,
+          restHolidays: program.restHolidays,
+        }
+        this.validateProgramInput(input)
+
+        const result = insertProgram.run(
+          input.tractateId,
+          input.programName.trim(),
+          input.startPage,
+          input.endPage,
+          input.targetEndDate,
+          input.pagesPerDay,
+          input.startDate,
+          input.paceMode,
+          program.status,
+          program.pausedAt,
+          program.completedAt,
+          program.createdAt,
+          program.uid,
+        )
+        const programId = Number(result.lastInsertRowid)
+        this.replaceRestDays(programId, input)
+        for (const page of program.pages) {
+          insertPage.run(
+            programId,
+            page.pageNumber,
+            page.scheduledDate,
+            Number(page.units.side_a_rashi),
+            Number(page.units.side_a_tosafot),
+            Number(page.units.side_b_rashi),
+            Number(page.units.side_b_tosafot),
+            page.completedAt,
+          )
+        }
+        existing.add(program.uid)
+        added += 1
+      }
+      return { added, skipped }
     })()
   }
 

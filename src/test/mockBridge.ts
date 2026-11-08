@@ -9,6 +9,7 @@ import type {
   ShasPageRecord,
   TodayProgramPlan,
 } from '../main/database'
+import type { ChooseBackupResult, ExportBackupResult, RestoreBackupResult } from '../main/preload'
 import type { StudyStats } from '../main/stats'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitFlags, type UnitTarget } from '../main/progress'
 
@@ -62,6 +63,11 @@ export type MockBridgeOptions = {
   studyStats?: StudyStats
   /** completedAt stamped on a page when its last unit is checked (default: a fixed UTC noon). */
   completedAtNow?: string
+  /** Last backup timestamp (stateful: a saved export updates it). */
+  lastBackupAt?: string | null
+  exportResult?: ExportBackupResult
+  chooseResult?: ChooseBackupResult
+  restoreResult?: RestoreBackupResult
 }
 
 export function mockBridge(options: MockBridgeOptions = {}) {
@@ -73,7 +79,19 @@ export function mockBridge(options: MockBridgeOptions = {}) {
   const completedAtNow = options.completedAtNow ?? '2026-11-08 12:00:00'
   const planRows = (plan: TodayProgramPlan) => [...plan.todayPages, ...plan.overduePages]
   const progressProgramId = options.program?.id
+  let lastBackupAt = options.lastBackupAt ?? null
   const bridge = {
+    getLastBackupAt: vi.fn(async () => lastBackupAt),
+    exportBackup: vi.fn(async (): Promise<ExportBackupResult> => {
+      const result = options.exportResult ?? { status: 'canceled' }
+      if (result.status === 'saved') lastBackupAt = result.exportedAt
+      return result
+    }),
+    chooseBackupFile: vi.fn(async (): Promise<ChooseBackupResult> => options.chooseResult ?? { status: 'canceled' }),
+    restoreBackup: vi.fn(
+      async (): Promise<RestoreBackupResult> =>
+        options.restoreResult ?? { added: 0, skipped: 0, snapshotPath: 'snapshot.json' },
+    ),
     // Summaries of the program whose schedule is mocked reflect its units, like the real service.
     listProgramSummaries: vi.fn(async () =>
       summaries.map((summary) => {

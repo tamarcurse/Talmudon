@@ -1,6 +1,8 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { BackupFormatError, parseBackup, type BackupFile, type BackupPreview } from './backup.js'
+import { defaultBackupFileName, readBackupFile, writeBackupFile, writeSafetySnapshot } from './backup-files.js'
 import { DatabaseService, type ProgramInput } from './database.js'
 import type { UnitTarget } from './progress.js'
 
@@ -77,6 +79,58 @@ ipcMain.handle(
   (_event, programId: number, targets: UnitTarget[], done: boolean) =>
     databaseService.setUnitsCompleted(programId, targets, done),
 )
+
+const JSON_FILTER = [{ name: 'גיבוי תלמודון', extensions: ['json'] }]
+
+ipcMain.handle('backup:get-last-backup-at', () => databaseService.getLastBackupAt())
+ipcMain.handle('backup:export', async () => {
+  const result = await dialog.showSaveDialog({
+    defaultPath: path.join(app.getPath('documents'), defaultBackupFileName()),
+    filters: JSON_FILTER,
+  })
+  if (result.canceled || !result.filePath) {
+    return { status: 'canceled' as const }
+  }
+  const backup = databaseService.exportBackup()
+  writeBackupFile(result.filePath, backup)
+  databaseService.markBackupExported(backup.exportedAt)
+  return { status: 'saved' as const, filePath: result.filePath, exportedAt: backup.exportedAt }
+})
+ipcMain.handle(
+  'backup:choose-file',
+  async (): Promise<
+    | { status: 'canceled' }
+    | { status: 'invalid' }
+    | { status: 'ready'; backup: BackupFile; preview: BackupPreview }
+  > => {
+    const result = await dialog.showOpenDialog({
+      defaultPath: app.getPath('documents'),
+      filters: JSON_FILTER,
+      properties: ['openFile'],
+    })
+    if (result.canceled || result.filePaths.length === 0) {
+      return { status: 'canceled' }
+    }
+    try {
+      const backup = readBackupFile(result.filePaths[0])
+      return { status: 'ready', backup, preview: databaseService.previewBackup(backup) }
+    } catch (error) {
+      if (error instanceof BackupFormatError) {
+        return { status: 'invalid' }
+      }
+      throw error
+    }
+  },
+)
+ipcMain.handle('backup:restore', (_event, payload: unknown) => {
+  // The renderer is not trusted: validate again, then snapshot current data before changing anything.
+  const backup = parseBackup(payload)
+  const snapshotPath = writeSafetySnapshot(
+    path.join(app.getPath('userData'), 'backups'),
+    databaseService.exportBackup(),
+  )
+  return { ...databaseService.mergeBackup(backup), snapshotPath }
+})
 
 app.whenReady().then(() => {
   databaseService.initialize()

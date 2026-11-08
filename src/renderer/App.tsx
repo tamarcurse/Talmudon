@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { Fragment, useState } from 'react'
+import BackupDialog from './components/backup/BackupDialog'
 import Dashboard from './components/dashboard/Dashboard'
 import AppHeader from './components/layout/AppHeader'
 import ConfirmDialog from './components/layout/ConfirmDialog'
@@ -19,6 +20,9 @@ function App() {
   const [view, setView] = useState<View>({ name: 'today' })
   // The destination chosen while the wizard is open, awaiting confirmation to discard unsaved changes.
   const [pendingLeave, setPendingLeave] = useState<View | null>(null)
+  const [backupOpen, setBackupOpen] = useState(false)
+  // Bumped after a restore so the open view remounts and reloads its data.
+  const [dataVersion, setDataVersion] = useState(0)
   const backToDashboard = () => setView({ name: 'dashboard' })
 
   function navigate(target: View) {
@@ -77,9 +81,13 @@ function App() {
 
   return (
     <AppHeader onHome={() => navigate({ name: 'today' })} onAllPrograms={() => navigate({ name: 'dashboard' })}
-      onStats={() => navigate({ name: 'stats' })}
+      onStats={() => navigate({ name: 'stats' })} onBackup={() => setBackupOpen(true)}
     >
-      {renderView()}
+      {/* The wizard keeps its key so a restore never wipes unsaved input. */}
+      <Fragment key={view.name === 'wizard' ? 'wizard' : dataVersion}>{renderView()}</Fragment>
+      {backupOpen && (
+        <BackupDialog onClose={() => setBackupOpen(false)} onRestored={() => setDataVersion((v) => v + 1)} />
+      )}
       {pendingLeave && (
         <ConfirmDialog
           title="לצאת בלי לשמור?"

@@ -232,4 +232,32 @@ describe('App', () => {
     expect(bridge.deleteProgram).toHaveBeenCalledWith(5)
     expect(await screen.findByText('אין עדיין תוכניות')).toBeInTheDocument()
   })
+
+  describe('backup', () => {
+    it('opens the backup dialog from the header', async () => {
+      renderApp()
+      fireEvent.click(await screen.findByRole('button', { name: 'גיבוי ושחזור' }))
+      expect(await screen.findByRole('dialog', { name: 'גיבוי ושחזור' })).toBeInTheDocument()
+    })
+
+    it('reloads the dashboard after a restore that added programs', async () => {
+      const bridge = renderApp({
+        chooseResult: {
+          status: 'ready',
+          backup: { format: 'talmudon-backup', version: 1, exportedAt: '2026-11-08T10:00:00.000Z', settings: { calendarType: 'gregorian', showHebrewDates: false }, programs: [] },
+          preview: { total: 1, newPrograms: 1, existingPrograms: 0 },
+        },
+        restoreResult: { added: 1, skipped: 0, snapshotPath: 's.json' },
+      })
+      await openDashboard()
+      const before = bridge.listProgramSummaries.mock.calls.length
+
+      fireEvent.click(screen.getByRole('button', { name: 'גיבוי ושחזור' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'שחזור מגיבוי' }))
+      fireEvent.click(await screen.findByRole('button', { name: 'שחזור' }))
+      await screen.findByText(/נוספו 1 תוכניות/)
+
+      await waitFor(() => expect(bridge.listProgramSummaries.mock.calls.length).toBeGreaterThan(before))
+    })
+  })
 })

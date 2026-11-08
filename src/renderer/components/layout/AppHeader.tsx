@@ -6,10 +6,11 @@ type Props = {
   onHome: () => void
   onAllPrograms?: () => void
   onStats?: () => void
+  onBackup?: () => void
 }
 
 /** Shared page shell: thin top bar (app name + calendar toggle) and a centered content area. */
-function AppHeader({ children, onHome, onAllPrograms, onStats }: Props) {
+function AppHeader({ children, onHome, onAllPrograms, onStats, onBackup }: Props) {
   return (
     <main className="min-h-screen bg-canvas text-ink" dir="rtl" lang="he">
       <div className="border-b border-line bg-surface">
@@ -54,6 +55,11 @@ function AppHeader({ children, onHome, onAllPrograms, onStats }: Props) {
             {onStats && (
               <button type="button" onClick={onStats} className="btn-ghost">
                 סטטיסטיקה
+              </button>
+            )}
+            {onBackup && (
+              <button type="button" onClick={onBackup} className="btn-ghost">
+                גיבוי ושחזור
               </button>
             )}
             <CalendarToggle />

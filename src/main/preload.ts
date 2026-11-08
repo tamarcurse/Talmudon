@@ -1,7 +1,15 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { BackupFile, BackupPreview } from './backup.js'
 import type { PageProgressRecord, ProgramInput, ProgramRecord, ProgramSummary, SettableProgramStatus, ShasPageRecord, TodayProgramPlan } from './database.js'
 import type { UnitTarget } from './progress.js'
 import type { StudyStats } from './stats.js'
+
+export type ExportBackupResult = { status: 'canceled' } | { status: 'saved'; filePath: string; exportedAt: string }
+export type ChooseBackupResult =
+  | { status: 'canceled' }
+  | { status: 'invalid' }
+  | { status: 'ready'; backup: BackupFile; preview: BackupPreview }
+export type RestoreBackupResult = { added: number; skipped: number; snapshotPath: string }
 
 contextBridge.exposeInMainWorld('talmudonBridge', {
   getVersion: () => ipcRenderer.invoke('app:get-version'),
@@ -25,6 +33,10 @@ contextBridge.exposeInMainWorld('talmudonBridge', {
   getStudyStats: () => ipcRenderer.invoke('database:get-study-stats'),
   setUnitsCompleted: (programId: number, targets: UnitTarget[], done: boolean) =>
     ipcRenderer.invoke('database:set-units-completed', programId, targets, done),
+  exportBackup: () => ipcRenderer.invoke('backup:export'),
+  chooseBackupFile: () => ipcRenderer.invoke('backup:choose-file'),
+  restoreBackup: (backup: BackupFile) => ipcRenderer.invoke('backup:restore', backup),
+  getLastBackupAt: () => ipcRenderer.invoke('backup:get-last-backup-at'),
 })
 
 declare global {
@@ -48,6 +60,10 @@ declare global {
       getTodayPlan: () => Promise<TodayProgramPlan[]>
       getStudyStats: () => Promise<StudyStats>
       setUnitsCompleted: (programId: number, targets: UnitTarget[], done: boolean) => Promise<void>
+      exportBackup: () => Promise<ExportBackupResult>
+      chooseBackupFile: () => Promise<ChooseBackupResult>
+      restoreBackup: (backup: BackupFile) => Promise<RestoreBackupResult>
+      getLastBackupAt: () => Promise<string | null>
     }
   }
 }
