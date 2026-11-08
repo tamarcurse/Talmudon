@@ -240,3 +240,72 @@ describe('recalculate and calendar', () => {
     ).toBeInTheDocument()
   })
 })
+
+describe('calendar view', () => {
+  const ROWS = [
+    progressRow(2, '2026-11-03'),
+    progressRow(3, '2026-11-08'),
+    progressRow(4, '2026-11-20'),
+    progressRow(5, '2026-12-02'),
+  ]
+  const cellOn = (iso: string) => screen.getByRole('gridcell', { name: new RegExp(`^${formatIsoDate(iso, 'gregorian')}`) })
+
+  async function openCalendar() {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date(2026, 10, 8, 12))
+    const result = await renderDetail({ program: { ...PROGRAM, restWeekdays: [6] }, progress: ROWS })
+    fireEvent.click(screen.getByRole('button', { name: 'לוח שנה' }))
+    return result
+  }
+
+  afterEach(() => vi.useRealTimers())
+
+  it('switches from the tree to a month grid', async () => {
+    await openCalendar()
+    expect(screen.getByRole('grid')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'נובמבר 2026' })).toBeInTheDocument()
+    expect(screen.queryByRole('checkbox', { name: "דף ג'" })).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'עץ' }))
+    expect(screen.getByRole('checkbox', { name: "דף ג'" })).toBeInTheDocument()
+  })
+
+  it('shows page status in the cell label', async () => {
+    await openCalendar()
+    expect(cellOn('2026-11-03')).toHaveAccessibleName(/דף ב' באיחור/)
+    expect(cellOn('2026-11-08')).toHaveAccessibleName(/דף ג' להיום/)
+    expect(cellOn('2026-11-20')).toHaveAccessibleName(/דף ד' מתוכנן/)
+  })
+
+  it('marks rest days', async () => {
+    await openCalendar()
+    expect(cellOn('2026-11-07')).toHaveAccessibleName(/מנוחה/)
+    expect(cellOn('2026-11-09')).not.toHaveAccessibleName(/מנוחה/)
+  })
+
+  it('moves between months', async () => {
+    await openCalendar()
+    fireEvent.click(screen.getByRole('button', { name: 'חודש הבא' }))
+    expect(screen.getByRole('heading', { name: 'דצמבר 2026' })).toBeInTheDocument()
+    expect(cellOn('2026-12-02')).toHaveAccessibleName(/דף ה'/)
+    expect(cellOn('2026-12-05')).toHaveAccessibleName(/חנוכה/)
+    fireEvent.click(screen.getByRole('button', { name: 'חודש קודם' }))
+    fireEvent.click(screen.getByRole('button', { name: 'חודש קודם' }))
+    expect(screen.getByRole('heading', { name: 'אוקטובר 2026' })).toBeInTheDocument()
+  })
+
+  it('follows the Hebrew calendar setting', async () => {
+    await openCalendar()
+    fireEvent.click(screen.getByRole('button', { name: 'עברי' }))
+    expect(screen.getByRole('heading', { name: 'חשון תשפ״ז' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'חודש הבא' }))
+    expect(screen.getByRole('heading', { name: 'כסלו תשפ״ז' })).toBeInTheDocument()
+  })
+
+  it('reflects progress marked in the tree', async () => {
+    await openCalendar()
+    fireEvent.click(screen.getByRole('button', { name: 'עץ' }))
+    fireEvent.click(screen.getByRole('checkbox', { name: "דף ג'" }))
+    fireEvent.click(screen.getByRole('button', { name: 'לוח שנה' }))
+    expect(cellOn('2026-11-08')).toHaveAccessibleName(/דף ג' הושלם/)
+  })
+})

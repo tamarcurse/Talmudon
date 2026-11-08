@@ -3,6 +3,7 @@ import type { PageProgressRecord, ProgramInput, ProgramRecord } from '../../../m
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitTarget } from '../../../main/progress'
 import { buildProgressTree } from '../../lib/progressTree'
 import ProgressPie from '../dashboard/ProgressPie'
+import ProgramCalendar from './ProgramCalendar'
 import ProgressTree from './ProgressTree'
 import RecalculateDialog from './RecalculateDialog'
 
@@ -22,6 +23,7 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
   const [program, setProgram] = useState<ProgramRecord | null>(null)
   const [rows, setRows] = useState<PageProgressRecord[]>([])
   const [recalculating, setRecalculating] = useState(false)
+  const [view, setView] = useState<'tree' | 'calendar'>('tree')
 
   const reloadRows = useCallback(async () => {
     setRows(await window.talmudonBridge.getPageProgress(programId))
@@ -100,7 +102,25 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
         </div>
       </header>
 
-      <ProgressTree days={days} onSetUnits={(targets, done) => void setUnits(targets, done)} />
+      <div role="group" aria-label="תצוגה" className="mb-4 flex gap-2">
+        {(['tree', 'calendar'] as const).map((value) => (
+          <button
+            key={value}
+            type="button"
+            aria-pressed={view === value}
+            onClick={() => setView(value)}
+            className={view === value ? 'btn-primary' : 'btn-secondary'}
+          >
+            {value === 'tree' ? 'עץ' : 'לוח שנה'}
+          </button>
+        ))}
+      </div>
+
+      {view === 'tree' ? (
+        <ProgressTree days={days} onSetUnits={(targets, done) => void setUnits(targets, done)} />
+      ) : (
+        program && <ProgramCalendar program={program} rows={rows} today={today} />
+      )}
 
       {recalculating && program && (
         <RecalculateDialog
