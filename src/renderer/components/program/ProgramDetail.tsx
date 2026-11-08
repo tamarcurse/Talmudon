@@ -3,7 +3,6 @@ import type { PageProgressRecord, ProgramInput, ProgramRecord } from '../../../m
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitTarget } from '../../../main/progress'
 import { buildProgressTree } from '../../lib/progressTree'
 import ProgressPie from '../dashboard/ProgressPie'
-import AppHeader from '../layout/AppHeader'
 import ProgressTree from './ProgressTree'
 import RecalculateDialog from './RecalculateDialog'
 
@@ -82,7 +81,7 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
   const today = localTodayIso()
 
   return (
-    <AppHeader>
+    <>
       <header className="card mb-8 flex flex-col gap-4 p-6 md:flex-row md:items-center md:justify-between">
         <div className="flex items-center gap-4">
           <ProgressPie percent={percent} />
@@ -112,7 +111,7 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
           onCancel={() => setRecalculating(false)}
         />
       )}
-    </AppHeader>
+    </>
   )
 }
 

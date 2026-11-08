@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import type { ProgramSummary } from '../../../main/database'
-import AppHeader from '../layout/AppHeader'
 import ProgramCard from './ProgramCard'
 
 type Props = {
@@ -30,7 +29,7 @@ function Dashboard({ onCreate, onEdit, onOpen }: Props) {
   }
 
   return (
-    <AppHeader>
+    <>
       <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-3xl font-bold text-ink">תוכניות הלימוד שלי</h1>
@@ -60,7 +59,7 @@ function Dashboard({ onCreate, onEdit, onOpen }: Props) {
           />
         ))}
       </section>
-    </AppHeader>
+    </>
   )
 }
 

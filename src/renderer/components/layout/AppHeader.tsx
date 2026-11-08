@@ -3,15 +3,21 @@ import CalendarToggle from '../dashboard/CalendarToggle'
 
 type Props = {
   children: ReactNode
+  onHome: () => void
 }
 
 /** Shared page shell: thin top bar (app name + calendar toggle) and a centered content area. */
-function AppHeader({ children }: Props) {
+function AppHeader({ children, onHome }: Props) {
   return (
     <main className="min-h-screen bg-canvas text-ink" dir="rtl" lang="he">
       <div className="border-b border-line bg-surface">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
-          <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={onHome}
+            aria-label="תלמודון – מסך הבית"
+            className="flex cursor-pointer items-center gap-3 rounded-xl p-1 transition-opacity hover:opacity-80 focus-visible:outline focus-visible:outline-2 focus-visible:outline-brand"
+          >
             <svg aria-hidden="true" viewBox="0 0 48 48" className="h-11 w-11 shrink-0">
               <defs>
                 <linearGradient id="logo-bg" x1="0" y1="0" x2="1" y2="1">
@@ -36,7 +42,7 @@ function AppHeader({ children }: Props) {
             <span className="bg-gradient-to-l from-brand to-sky bg-clip-text text-4xl font-extrabold tracking-tight text-transparent">
               תלמודון
             </span>
-          </div>
+          </button>
           <CalendarToggle />
         </div>
       </div>

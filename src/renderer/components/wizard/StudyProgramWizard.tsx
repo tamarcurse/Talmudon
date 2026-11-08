@@ -477,8 +477,8 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-canvas text-ink" dir="rtl" lang="he">
-      <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 p-6 lg:p-10">
+    <div className="text-ink">
+      <div className="mx-auto flex max-w-3xl flex-col gap-6">
         <header className="space-y-4">
           <h2 className="text-2xl font-bold text-ink">
             {mode === 'edit' ? 'עריכת תוכנית לימוד' : 'יצירת תוכנית לימוד חדשה'}

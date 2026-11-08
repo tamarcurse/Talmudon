@@ -31,6 +31,7 @@ const PROGRAM: ProgramRecord = {
   targetEndDate: '2027-04-12',
   restWeekdays: [],
   restDates: [],
+  restHolidays: [],
 }
 
 function renderApp(options: MockBridgeOptions = {}) {
@@ -92,6 +93,48 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'ביטול' }))
     expect(await screen.findByRole('heading', { name: 'שבת בשנה' })).toBeInTheDocument()
+  })
+
+  it('shows the top bar on the dashboard, program view and wizard', async () => {
+    renderApp()
+    const logo = { name: 'תלמודון – מסך הבית' }
+    expect(screen.getByRole('button', logo)).toBeInTheDocument()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    await screen.findByRole('heading', { name: 'שבת בשנה' })
+    expect(screen.getByRole('button', logo)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'עריכת תוכנית' }))
+    await screen.findByLabelText('חיפוש מסכת')
+    expect(screen.getByRole('button', logo)).toBeInTheDocument()
+  })
+
+  it('logo returns from the program view to the dashboard', async () => {
+    renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    await screen.findByRole('heading', { name: 'שבת בשנה' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
+    expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+  })
+
+  it('logo in the wizard asks for confirmation before leaving', async () => {
+    renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
+    await screen.findByLabelText('חיפוש מסכת')
+
+    fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
+    expect(screen.getByRole('dialog', { name: 'לצאת בלי לשמור?' })).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'המשך עריכה' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByLabelText('חיפוש מסכת')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
+    fireEvent.click(screen.getByRole('button', { name: 'יציאה' }))
+    expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
   })
 
   it('dashboard pie reflects units checked in the program view', async () => {

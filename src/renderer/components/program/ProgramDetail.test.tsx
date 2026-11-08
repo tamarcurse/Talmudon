@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProgramRecord } from '../../../main/database'
 import { mockBridge, progressRow, type MockBridgeOptions } from '../../../test/mockBridge'
 import { CalendarProvider } from '../../context/CalendarContext'
+import AppHeader from '../layout/AppHeader'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import ProgramDetail from './ProgramDetail'
 
@@ -22,6 +23,7 @@ const PROGRAM: ProgramRecord = {
   targetEndDate: '2026-11-08',
   restWeekdays: [],
   restDates: [],
+  restHolidays: [],
 }
 
 const ONE_PAGE = [progressRow(3, '2026-11-08')]
@@ -32,7 +34,9 @@ async function renderDetail(options: MockBridgeOptions = {}) {
   const handlers = { onBack: vi.fn(), onEdit: vi.fn() }
   render(
     <CalendarProvider>
-      <ProgramDetail programId={7} {...handlers} />
+      <AppHeader onHome={vi.fn()}>
+        <ProgramDetail programId={7} {...handlers} />
+      </AppHeader>
     </CalendarProvider>,
   )
   await screen.findByRole('heading', { name: 'שבת בשנה' })

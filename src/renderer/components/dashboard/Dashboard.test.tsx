@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { ProgramSummary } from '../../../main/database'
 import { mockBridge, type MockBridgeOptions } from '../../../test/mockBridge'
 import { CalendarProvider } from '../../context/CalendarContext'
+import AppHeader from '../layout/AppHeader'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import Dashboard from './Dashboard'
 
@@ -28,7 +29,9 @@ async function renderDashboard(options: MockBridgeOptions = {}) {
   const handlers = { onCreate: vi.fn(), onEdit: vi.fn(), onOpen: vi.fn() }
   render(
     <CalendarProvider>
-      <Dashboard {...handlers} />
+      <AppHeader onHome={vi.fn()}>
+        <Dashboard {...handlers} />
+      </AppHeader>
     </CalendarProvider>,
   )
   await waitFor(() => expect(bridge.listProgramSummaries).toHaveBeenCalled())
