@@ -1,6 +1,7 @@
+import { isPageComplete, unitPercent, type UnitFlags } from './progress.js'
 import { computeEndDate, type RestRules } from './schedule.js'
 
-export type MetricsPage = { scheduledDate: string; isPageCompleted: boolean }
+export type MetricsPage = { scheduledDate: string; units: UnitFlags }
 
 export type ProgramMetrics = {
   percentComplete: number
@@ -25,10 +26,10 @@ export function computeProgramMetrics(params: {
   const { pages, today, status, pausedAt, startDate, pagesPerDay, rest } = params
   const referenceDate = status === 'paused' && pausedAt ? pausedAt : today
 
-  const completed = pages.filter((page) => page.isPageCompleted)
-  const pending = pages.filter((page) => !page.isPageCompleted)
+  const completed = pages.filter((page) => isPageComplete(page.units))
+  const pending = pages.filter((page) => !isPageComplete(page.units))
 
-  const percentComplete = pages.length === 0 ? 0 : (completed.length / pages.length) * 100
+  const percentComplete = unitPercent(pages)
   const lag = pending.filter((page) => page.scheduledDate < referenceDate).length
   const lead = completed.filter((page) => page.scheduledDate > referenceDate).length
 

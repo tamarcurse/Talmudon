@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import type { ProgramRecord, ProgramSummary } from './main/database'
 import App from './renderer/App'
 import { CalendarProvider } from './renderer/context/CalendarContext'
-import { mockBridge, type MockBridgeOptions } from './test/mockBridge'
+import { mockBridge, progressRow, type MockBridgeOptions } from './test/mockBridge'
 
 afterEach(() => {
   delete (window as Partial<Window>).talmudonBridge
@@ -70,12 +70,38 @@ describe('App', () => {
   })
 
   it('open enters the program view and can return to the dashboard', async () => {
-    renderApp()
+    const bridge = renderApp()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    expect(await screen.findByRole('heading', { name: 'שבת בשנה' })).toBeInTheDocument()
+    expect(bridge.getPageProgress).toHaveBeenCalledWith(5)
     expect(screen.queryByRole('heading', { name: 'תוכניות הלימוד שלי' })).not.toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: 'חזרה לתוכניות' }))
     expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+  })
+
+  it('edit from the program view opens the wizard and returns to the program view', async () => {
+    const bridge = renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    fireEvent.click(await screen.findByRole('button', { name: 'עריכת תוכנית' }))
+
+    await waitFor(() => expect(bridge.getProgram).toHaveBeenCalledWith(5))
+    expect(await screen.findByLabelText('חיפוש מסכת')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'ביטול' }))
+    expect(await screen.findByRole('heading', { name: 'שבת בשנה' })).toBeInTheDocument()
+  })
+
+  it('dashboard pie reflects units checked in the program view', async () => {
+    renderApp({ progress: [progressRow(2, '2026-11-08')] })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    fireEvent.click(await screen.findByRole('button', { name: "פתח דף ב'" }))
+    fireEvent.click(await screen.findByRole('checkbox', { name: "דף ב' עמוד א' רש\"י" }))
+    fireEvent.click(screen.getByRole('button', { name: 'חזרה לתוכניות' }))
+
+    expect(await screen.findByRole('img', { name: 'הושלמו 25%' })).toBeInTheDocument()
   })
 })

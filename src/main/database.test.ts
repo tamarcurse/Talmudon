@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DatabaseService, type ProgramInput } from './database.js'
+import { UNIT_KEYS } from './progress.js'
 
 const testServices: DatabaseService[] = []
 const testDirs: string[] = []
@@ -19,6 +20,14 @@ afterEach(() => {
   }
   testDirs.length = 0
 })
+
+function completePage(service: DatabaseService, programId: number, pageNumber: number) {
+  service.setUnitsCompleted(
+    programId,
+    UNIT_KEYS.map((unit) => ({ pageNumber, unit })),
+    true,
+  )
+}
 
 function createTestPath(name: string) {
   const dir = mkdtempSync(join(tmpdir(), `talmudon-${name}-`))
@@ -374,22 +383,122 @@ describe('page_progress schedule', () => {
     expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-04', '2026-01-05', '2026-01-06'])
   })
 
-  it('setPageCompleted marks and unmarks a page', () => {
+  const page = (service: DatabaseService, id: number, pageNumber: number) =>
+    service.getPageProgress(id).find((p) => p.pageNumber === pageNumber)!
+
+  it('getPageProgress returns all four units as false for a new program', () => {
     const service = setup()
     const id = service.createProgram(baseInput)
-    service.setPageCompleted(id, 3, true)
-    expect(service.getPageProgress(id).find((p) => p.pageNumber === 3)?.isPageCompleted).toBe(true)
-    service.setPageCompleted(id, 3, false)
-    expect(service.getPageProgress(id).find((p) => p.pageNumber === 3)?.isPageCompleted).toBe(false)
+    for (const p of service.getPageProgress(id)) {
+      expect(p.units).toEqual({
+        side_a_rashi: false,
+        side_a_tosafot: false,
+        side_b_rashi: false,
+        side_b_tosafot: false,
+      })
+    }
+  })
+
+  it('setUnitsCompleted turns on one unit and leaves the other three off', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setUnitsCompleted(id, [{ pageNumber: 3, unit: 'side_a_rashi' }], true)
+    expect(page(service, id, 3).units).toEqual({
+      side_a_rashi: true,
+      side_a_tosafot: false,
+      side_b_rashi: false,
+      side_b_tosafot: false,
+    })
+    expect(page(service, id, 3).isPageCompleted).toBe(false)
+    expect(Object.values(page(service, id, 2).units).some(Boolean)).toBe(false)
+  })
+
+  it('setUnitsCompleted with done=false turns a unit back off', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setUnitsCompleted(id, [{ pageNumber: 3, unit: 'side_b_tosafot' }], true)
+    service.setUnitsCompleted(id, [{ pageNumber: 3, unit: 'side_b_tosafot' }], false)
+    expect(page(service, id, 3).units.side_b_tosafot).toBe(false)
+  })
+
+  it('setUnitsCompleted updates several pages in one call', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setUnitsCompleted(
+      id,
+      [2, 3].flatMap((pageNumber) => UNIT_KEYS.map((unit) => ({ pageNumber, unit }))),
+      true,
+    )
+    expect(page(service, id, 2).isPageCompleted).toBe(true)
+    expect(page(service, id, 3).isPageCompleted).toBe(true)
+    expect(page(service, id, 4).isPageCompleted).toBe(false)
+  })
+
+  it('setUnitsCompleted rolls back everything when one target is unknown', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    expect(() =>
+      service.setUnitsCompleted(
+        id,
+        [
+          { pageNumber: 2, unit: 'side_a_rashi' },
+          { pageNumber: 999, unit: 'side_a_rashi' },
+        ],
+        true,
+      ),
+    ).toThrow()
+    expect(page(service, id, 2).units.side_a_rashi).toBe(false)
+
+    expect(() =>
+      service.setUnitsCompleted(
+        id,
+        [
+          { pageNumber: 2, unit: 'side_a_rashi' },
+          { pageNumber: 3, unit: 'bogus; DROP TABLE page_progress' as never },
+        ],
+        true,
+      ),
+    ).toThrow()
+    expect(page(service, id, 2).units.side_a_rashi).toBe(false)
+  })
+
+  it('completedAt is set only when all four units are on and cleared when one is turned off', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setUnitsCompleted(id, [{ pageNumber: 2, unit: 'side_a_rashi' }], true)
+    expect(page(service, id, 2).completedAt).toBeNull()
+
+    completePage(service, id, 2)
+    expect(page(service, id, 2).completedAt).not.toBeNull()
+
+    service.setUnitsCompleted(id, [{ pageNumber: 2, unit: 'side_b_rashi' }], false)
+    expect(page(service, id, 2).completedAt).toBeNull()
+  })
+
+  it('recalc treats a page with only some units done as pending', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setUnitsCompleted(id, [{ pageNumber: 2, unit: 'side_a_rashi' }], true)
+    service.recalculateProgram(id, '2026-01-05')
+    expect(dates(service, id)).toEqual(['2026-01-05', '2026-01-06', '2026-01-07', '2026-01-08'])
+    expect(page(service, id, 2).units.side_a_rashi).toBe(true)
   })
 
   it('recalc keeps completed dates and moves the rest to today', () => {
     const service = setup()
     const id = service.createProgram(baseInput)
-    service.setPageCompleted(id, 2, true)
-    service.setPageCompleted(id, 3, true)
+    completePage(service, id, 2)
+    completePage(service, id, 3)
     service.recalculateProgram(id, '2026-01-05')
     expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-02', '2026-01-05', '2026-01-06'])
+  })
+
+  it('recalc of a target-date program whose deadline passed catches up from today instead of failing', () => {
+    const service = setup()
+    const id = service.createProgram({ ...baseInput, paceMode: 'target_date', targetEndDate: '2026-01-04' })
+    service.recalculateProgram(id, '2026-01-10')
+    expect(dates(service, id)).toEqual(['2026-01-10', '2026-01-11', '2026-01-12', '2026-01-13'])
+    expect(service.getProgram(id)?.targetEndDate).toBe('2026-01-04')
   })
 
   it('recalc moves an overdue page to today', () => {
@@ -442,7 +551,7 @@ describe('page_progress schedule', () => {
     service.updateProgram(id, { ...baseInput, endPage: 6 }, '2026-01-01')
     expect(service.getPageProgress(id).map((p) => p.pageNumber)).toEqual([2, 3, 4, 5, 6])
 
-    service.setPageCompleted(id, 6, true)
+    completePage(service, id, 6)
     service.updateProgram(id, { ...baseInput, endPage: 4 }, '2026-01-01')
     expect(service.getPageProgress(id).map((p) => p.pageNumber)).toEqual([2, 3, 4, 6])
     expect(service.getPageProgress(id).find((p) => p.pageNumber === 6)?.isPageCompleted).toBe(true)
@@ -505,8 +614,8 @@ describe('program summaries and pause/resume', () => {
     const service = setup()
     const a = service.createProgram(input)
     const b = service.createProgram({ ...input, programName: 'תוכנית ב' })
-    service.setPageCompleted(a, 2, true)
-    service.setPageCompleted(a, 3, true)
+    completePage(service, a, 2)
+    completePage(service, a, 3)
 
     const summaries = service.listProgramSummaries('2026-01-03')
     expect(summaries.map((s) => s.id)).toEqual([a, b])
@@ -519,6 +628,16 @@ describe('program summaries and pause/resume', () => {
       estimatedEndDate: '2026-01-04',
     })
     expect(summaries[1]).toMatchObject({ programName: 'תוכנית ב', percentComplete: 0, lag: 2 })
+  })
+
+  it('reports percent by units', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    service.setUnitsCompleted(id, [{ pageNumber: 2, unit: 'side_a_rashi' }], true)
+    expect(service.listProgramSummaries('2026-01-01')[0].percentComplete).toBe(6.25)
+
+    completePage(service, id, 2)
+    expect(service.listProgramSummaries('2026-01-01')[0].percentComplete).toBe(25)
   })
 
   it('pausing freezes lag as time moves forward', () => {

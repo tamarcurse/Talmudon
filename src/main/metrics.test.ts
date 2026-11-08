@@ -1,9 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { computeProgramMetrics } from './metrics.js'
+import type { UnitFlags } from './progress.js'
 
 const NO_REST = { weekdays: [], dates: [] }
 
-type Page = { scheduledDate: string; isPageCompleted: boolean }
+type Page = { scheduledDate: string; units: UnitFlags }
+
+const unitFlags = (on: number): UnitFlags => ({
+  side_a_rashi: on > 0,
+  side_a_tosafot: on > 1,
+  side_b_rashi: on > 2,
+  side_b_tosafot: on > 3,
+})
 
 function metrics(
   pages: Page[],
@@ -21,13 +29,22 @@ function metrics(
   })
 }
 
-const done = (scheduledDate: string): Page => ({ scheduledDate, isPageCompleted: true })
-const pending = (scheduledDate: string): Page => ({ scheduledDate, isPageCompleted: false })
+const done = (scheduledDate: string): Page => ({ scheduledDate, units: unitFlags(4) })
+const pending = (scheduledDate: string): Page => ({ scheduledDate, units: unitFlags(0) })
+const partial = (scheduledDate: string, on: number): Page => ({ scheduledDate, units: unitFlags(on) })
 
 describe('percentComplete', () => {
   it('is 0 when nothing is completed and 50 when half are', () => {
     expect(metrics([pending('2026-11-11'), pending('2026-11-12')]).percentComplete).toBe(0)
     expect(metrics([done('2026-11-09'), pending('2026-11-12')]).percentComplete).toBe(50)
+  })
+
+  it('counts units, not whole pages', () => {
+    expect(metrics([partial('2026-11-09', 2), pending('2026-11-12')]).percentComplete).toBe(25)
+  })
+
+  it('keeps a partly done page pending for lag', () => {
+    expect(metrics([partial('2026-11-08', 3)]).lag).toBe(1)
   })
 })
 

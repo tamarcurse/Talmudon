@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import Dashboard from './components/dashboard/Dashboard'
+import ProgramDetail from './components/program/ProgramDetail'
 import StudyProgramWizard from './components/wizard/StudyProgramWizard'
 
 type View =
   | { name: 'dashboard' }
   | { name: 'wizard'; mode: 'create' }
-  | { name: 'wizard'; mode: 'edit'; programId: number }
+  | { name: 'wizard'; mode: 'edit'; programId: number; returnTo: View }
   | { name: 'program'; programId: number }
 
 function App() {
@@ -13,32 +14,34 @@ function App() {
   const backToDashboard = () => setView({ name: 'dashboard' })
 
   if (view.name === 'wizard') {
+    const leave = view.mode === 'edit' ? () => setView(view.returnTo) : backToDashboard
     return (
       <StudyProgramWizard
         mode={view.mode}
         programId={view.mode === 'edit' ? view.programId : undefined}
-        onSaved={backToDashboard}
-        onCancel={backToDashboard}
+        onSaved={leave}
+        onCancel={leave}
       />
     )
   }
 
   if (view.name === 'program') {
-    // Placeholder until the program screen (ticket 06) exists.
     return (
-      <main className="min-h-screen bg-slate-950 p-8 text-slate-100" dir="rtl" lang="he">
-        <button type="button" onClick={backToDashboard} className="text-sm text-cyan-300">
-          חזרה לתוכניות
-        </button>
-        <p className="mt-4 text-slate-300">מסך התוכנית (בקרוב)</p>
-      </main>
+      <ProgramDetail
+        key={view.programId}
+        programId={view.programId}
+        onBack={backToDashboard}
+        onEdit={(programId) => setView({ name: 'wizard', mode: 'edit', programId, returnTo: view })}
+      />
     )
   }
 
   return (
     <Dashboard
       onCreate={() => setView({ name: 'wizard', mode: 'create' })}
-      onEdit={(programId) => setView({ name: 'wizard', mode: 'edit', programId })}
+      onEdit={(programId) =>
+        setView({ name: 'wizard', mode: 'edit', programId, returnTo: { name: 'dashboard' } })
+      }
       onOpen={(programId) => setView({ name: 'program', programId })}
     />
   )

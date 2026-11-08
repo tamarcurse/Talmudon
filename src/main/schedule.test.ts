@@ -173,14 +173,34 @@ describe('planSchedule', () => {
     expect(dates(plan)).toEqual(['2026-01-01', '2026-01-03', '2026-01-04'])
   })
 
-  it('handles 0.5 pages per day, counting only study days', () => {
+  it('spreads a pace under one page a day from the first day to the end date, counting only study days', () => {
+    // 3 pages at 0.5 take 6 study days (01-01..01-06): pages land on days 0, 2.5 -> 3, 5.
     expect(dates(planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 0.5, rest: NO_REST }))).toEqual([
-      '2026-01-01', '2026-01-03', '2026-01-05',
+      '2026-01-01', '2026-01-04', '2026-01-06',
     ])
-    // Saturday (01-03) is rest: study days are 01-01, 01-02, 01-04, 01-05, 01-06; pages land on days 0, 2, 4
+    // Saturday (01-03) is rest: study days are 01-01, 01-02, 01-04, 01-05, 01-06, 01-07.
     expect(
       dates(planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 0.5, rest: { weekdays: [6], dates: [] } })),
-    ).toEqual(['2026-01-01', '2026-01-04', '2026-01-06'])
+    ).toEqual(['2026-01-01', '2026-01-05', '2026-01-07'])
+  })
+
+  it('puts a single page under a slow pace on the end date', () => {
+    expect(dates(planSchedule({ pages: [2], startDate: '2026-01-01', pagesPerDay: 0.25, rest: NO_REST }))).toEqual([
+      '2026-01-04',
+    ])
+  })
+
+  it('always lands the last page on computeEndDate and the first on the start date', () => {
+    for (const pagesPerDay of [0.13, 0.2, 0.5, 0.7, 1, 1.5, 2, 2.4, 3]) {
+      for (const total of [1, 2, 3, 5, 8, 13]) {
+        const pages = Array.from({ length: total }, (_, i) => i + 2)
+        const rest = { weekdays: [6], dates: ['2026-01-05'] }
+        const plan = planSchedule({ pages, startDate: '2026-01-01', pagesPerDay, rest })
+        const end = computeEndDate({ startDate: '2026-01-01', totalDafim: total, pagesPerDay, rest })
+        expect(plan[total - 1].date, `pace ${pagesPerDay}, ${total} pages`).toBe(end)
+        if (total > 1) expect(plan[0].date, `pace ${pagesPerDay}, ${total} pages`).toBe('2026-01-01')
+      }
+    }
   })
 
   it('handles 2 pages per day', () => {
@@ -189,10 +209,10 @@ describe('planSchedule', () => {
     ])
   })
 
-  it('alternates 2,1,2,1 for 1.5 and ends on computeEndDate', () => {
+  it('alternates 1,2,1,2 for 1.5 and ends on computeEndDate', () => {
     const pages = [2, 3, 4, 5, 6, 7]
     const plan = planSchedule({ pages, startDate: '2026-01-01', pagesPerDay: 1.5, rest: NO_REST })
-    expect(dates(plan)).toEqual(['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-03', '2026-01-04'])
+    expect(dates(plan)).toEqual(['2026-01-01', '2026-01-02', '2026-01-02', '2026-01-03', '2026-01-04', '2026-01-04'])
     expect(plan[5].date).toBe(computeEndDate({ startDate: '2026-01-01', totalDafim: 6, pagesPerDay: 1.5, rest: NO_REST }))
   })
 

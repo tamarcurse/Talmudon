@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
 import { computeProgramMetrics, type ProgramMetrics } from './metrics.js'
+import { UNIT_KEYS, isPageComplete, isUnitKey, type UnitFlags, type UnitTarget } from './progress.js'
 import { computeEndDate, computePagesPerDay, planSchedule } from './schedule.js'
 import { TRACTATES_SEED, buildShasPagesSeed } from './seed-data.js'
 
@@ -60,7 +61,10 @@ export type PageProgressRecord = {
   id: number
   pageNumber: number
   scheduledDate: string
+  units: UnitFlags
+  /** Derived from units, never stored. */
   isPageCompleted: boolean
+  completedAt: string | null
 }
 
 type SqliteDatabase = InstanceType<typeof Database>
@@ -442,7 +446,7 @@ export class DatabaseService {
         throw new Error(`Unknown program: ${id}`)
       }
       this.replaceRestDays(id, input)
-      this.recalculateInTransaction(id, today)
+      this.recalculateInTransaction(id, today, false)
     })
 
     save()
@@ -469,7 +473,11 @@ export class DatabaseService {
     }
   }
 
-  private recalculateInTransaction(id: number, today: string): void {
+  /**
+   * Reschedules pending pages from today. With `lenient`, a target date that can no longer be met
+   * keeps the deadline and catches up at the stored pace (at least a page a day) instead of failing.
+   */
+  private recalculateInTransaction(id: number, today: string, lenient = true): void {
     const db = this.ensureDatabase()
     const program = this.getProgram(id)
     if (!program) {
@@ -506,13 +514,17 @@ export class DatabaseService {
     const rest = { weekdays: program.restWeekdays, dates: program.restDates }
     let pagesPerDay = program.pagesPerDay
     let targetEndDate = program.targetEndDate
-    if (program.paceMode === 'target_date') {
+    const deadlinePassed = program.paceMode === 'target_date' && program.targetEndDate < startDate
+    if (program.paceMode === 'target_date' && !(lenient && deadlinePassed)) {
       pagesPerDay = computePagesPerDay({
         startDate,
         targetEndDate: program.targetEndDate,
         totalDafim: remaining.length,
         rest,
       })
+    } else if (deadlinePassed) {
+      pagesPerDay = Math.max(1, program.pagesPerDay)
+      targetEndDate = program.targetEndDate
     } else {
       targetEndDate = computeEndDate({ startDate, totalDafim: remaining.length, pagesPerDay, rest })
     }
@@ -542,37 +554,58 @@ export class DatabaseService {
     const db = this.ensureDatabase()
     const rows = db
       .prepare(
-        `SELECT id, page_number, scheduled_date, ${PAGE_COMPLETE_SQL} AS is_page_completed
+        `SELECT id, page_number, scheduled_date, completed_at,
+                side_a_rashi, side_a_tosafot, side_b_rashi, side_b_tosafot
            FROM page_progress
           WHERE program_id = ? ORDER BY page_number ASC`,
       )
-      .all(programId) as Array<{
-      id: number
-      page_number: number
-      scheduled_date: string
-      is_page_completed: number
-    }>
-    return rows.map((row) => ({
-      id: row.id,
-      pageNumber: row.page_number,
-      scheduledDate: row.scheduled_date,
-      isPageCompleted: Boolean(row.is_page_completed),
-    }))
+      .all(programId) as Array<
+      {
+        id: number
+        page_number: number
+        scheduled_date: string
+        completed_at: string | null
+      } & Record<(typeof UNIT_KEYS)[number], number>
+    >
+    return rows.map((row) => {
+      const units = Object.fromEntries(UNIT_KEYS.map((key) => [key, Boolean(row[key])])) as UnitFlags
+      return {
+        id: row.id,
+        pageNumber: row.page_number,
+        scheduledDate: row.scheduled_date,
+        units,
+        isPageCompleted: isPageComplete(units),
+        completedAt: row.completed_at,
+      }
+    })
   }
 
-  setPageCompleted(programId: number, pageNumber: number, completed: boolean): void {
+  /** Sets atomic units on or off in one transaction; any unknown target rolls everything back. */
+  setUnitsCompleted(programId: number, targets: UnitTarget[], done: boolean): void {
     const db = this.ensureDatabase()
-    const result = db
-      .prepare(
+    db.transaction(() => {
+      for (const { pageNumber, unit } of targets) {
+        if (!isUnitKey(unit)) {
+          throw new Error(`Unknown unit: ${String(unit)}`)
+        }
+        // `unit` is validated against UNIT_KEYS above, so interpolating the column name is safe.
+        const result = db
+          .prepare(`UPDATE page_progress SET ${unit} = ? WHERE program_id = ? AND page_number = ?`)
+          .run(done ? 1 : 0, programId, pageNumber)
+        if (result.changes === 0) {
+          throw new Error(`Unknown page ${pageNumber} in program ${programId}`)
+        }
+      }
+      const syncCompletedAt = db.prepare(
         `UPDATE page_progress
-            SET side_a_rashi = @done, side_a_tosafot = @done, side_b_rashi = @done, side_b_tosafot = @done,
-                completed_at = CASE WHEN @done THEN CURRENT_TIMESTAMP ELSE NULL END
-          WHERE program_id = @programId AND page_number = @pageNumber`,
+            SET completed_at = CASE WHEN ${PAGE_COMPLETE_SQL}
+                                    THEN COALESCE(completed_at, CURRENT_TIMESTAMP) ELSE NULL END
+          WHERE program_id = ? AND page_number = ?`,
       )
-      .run({ done: completed ? 1 : 0, programId, pageNumber })
-    if (result.changes === 0) {
-      throw new Error(`Unknown page ${pageNumber} in program ${programId}`)
-    }
+      for (const pageNumber of new Set(targets.map((target) => target.pageNumber))) {
+        syncCompletedAt.run(programId, pageNumber)
+      }
+    })()
   }
 
   getProgram(id: number): ProgramRecord | null {

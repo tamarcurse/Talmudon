@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { DatabaseService, type ProgramInput } from './database.js'
+import type { UnitTarget } from './progress.js'
 
 const isDev = !app.isPackaged
 const rendererUrl = 'http://localhost:5173'
@@ -16,7 +17,8 @@ function createWindow() {
     minHeight: 700,
     backgroundColor: '#020817',
     autoHideMenuBar: !isDev,
-    title: 'Talmudon',
+    title: 'תלמודון',
+    icon: fileURLToPath(new URL('../build/icon.png', import.meta.url)),
     webPreferences: {
       preload: fileURLToPath(new URL('./preload.js', import.meta.url)),
       contextIsolation: true,
@@ -68,9 +70,9 @@ ipcMain.handle('database:get-page-progress', (_event, programId: number) =>
   databaseService.getPageProgress(programId),
 )
 ipcMain.handle(
-  'database:set-page-completed',
-  (_event, programId: number, pageNumber: number, completed: boolean) =>
-    databaseService.setPageCompleted(programId, pageNumber, completed),
+  'database:set-units-completed',
+  (_event, programId: number, targets: UnitTarget[], done: boolean) =>
+    databaseService.setUnitsCompleted(programId, targets, done),
 )
 
 app.whenReady().then(() => {

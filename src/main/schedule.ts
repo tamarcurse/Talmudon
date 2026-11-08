@@ -100,9 +100,21 @@ export function computePagesPerDay(params: {
 }
 
 /**
- * Spread `pages` over study days starting at `startDate`. Page i (from 0) lands on the
- * study day ⌊i / pagesPerDay⌋, so the last page lands exactly on `computeEndDate`.
+ * Index (from 0) of the study day page i of `total` lands on. The first page is always on day 0
+ * and the last on day ⌈total / pagesPerDay⌉ - 1, i.e. exactly on `computeEndDate`.
+ * - pagesPerDay >= 1: page i lands on the day the pace reaches it (⌈(i+1) / pace⌉ - 1),
+ *   so whole paces put exactly `pace` pages on each day.
+ * - pagesPerDay < 1: each page gets its own day, spread evenly from the first to the last day.
  */
+function studyDayOfPage(i: number, total: number, pagesPerDay: number): number {
+  const lastDay = Math.ceil(total / pagesPerDay - 1e-9) - 1
+  if (pagesPerDay >= 1) {
+    return Math.ceil((i + 1) / pagesPerDay - 1e-9) - 1
+  }
+  return total === 1 ? lastDay : Math.round((i * lastDay) / (total - 1))
+}
+
+/** Spread `pages` over study days starting at `startDate`; the last page lands on `computeEndDate`. */
 export function planSchedule(params: {
   pages: number[]
   startDate: string
@@ -124,7 +136,7 @@ export function planSchedule(params: {
   let time = parseIso(startDate)
   let studyDayIndex = -1
   pages.forEach((page, i) => {
-    const targetDay = Math.floor(i / pagesPerDay + 1e-9)
+    const targetDay = studyDayOfPage(i, pages.length, pagesPerDay)
     while (studyDayIndex < targetDay) {
       if (studyDayIndex >= 0) {
         time += DAY_MS
