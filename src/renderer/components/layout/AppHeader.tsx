@@ -5,10 +5,11 @@ type Props = {
   children: ReactNode
   onHome: () => void
   onAllPrograms?: () => void
+  onStats?: () => void
 }
 
 /** Shared page shell: thin top bar (app name + calendar toggle) and a centered content area. */
-function AppHeader({ children, onHome, onAllPrograms }: Props) {
+function AppHeader({ children, onHome, onAllPrograms, onStats }: Props) {
   return (
     <main className="min-h-screen bg-canvas text-ink" dir="rtl" lang="he">
       <div className="border-b border-line bg-surface">
@@ -48,6 +49,11 @@ function AppHeader({ children, onHome, onAllPrograms }: Props) {
             {onAllPrograms && (
               <button type="button" onClick={onAllPrograms} className="btn-ghost">
                 כל התוכניות
+              </button>
+            )}
+            {onStats && (
+              <button type="button" onClick={onStats} className="btn-ghost">
+                סטטיסטיקה
               </button>
             )}
             <CalendarToggle />

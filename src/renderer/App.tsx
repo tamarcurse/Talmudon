@@ -3,12 +3,14 @@ import Dashboard from './components/dashboard/Dashboard'
 import AppHeader from './components/layout/AppHeader'
 import ConfirmDialog from './components/layout/ConfirmDialog'
 import ProgramDetail from './components/program/ProgramDetail'
+import StatsScreen from './components/stats/StatsScreen'
 import TodayScreen from './components/today/TodayScreen'
 import StudyProgramWizard from './components/wizard/StudyProgramWizard'
 
 type View =
   | { name: 'today' }
   | { name: 'dashboard' }
+  | { name: 'stats' }
   | { name: 'wizard'; mode: 'create' }
   | { name: 'wizard'; mode: 'edit'; programId: number; returnTo: View }
   | { name: 'program'; programId: number }
@@ -49,6 +51,10 @@ function App() {
       )
     }
 
+    if (view.name === 'stats') {
+      return <StatsScreen />
+    }
+
     if (view.name === 'today') {
       return (
         <TodayScreen
@@ -70,7 +76,9 @@ function App() {
   }
 
   return (
-    <AppHeader onHome={() => navigate({ name: 'today' })} onAllPrograms={() => navigate({ name: 'dashboard' })}>
+    <AppHeader onHome={() => navigate({ name: 'today' })} onAllPrograms={() => navigate({ name: 'dashboard' })}
+      onStats={() => navigate({ name: 'stats' })}
+    >
       {renderView()}
       {pendingLeave && (
         <ConfirmDialog

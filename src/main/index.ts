@@ -70,6 +70,7 @@ ipcMain.handle('database:recalculate-program', (_event, id: number) =>
 ipcMain.handle('database:get-page-progress', (_event, programId: number) =>
   databaseService.getPageProgress(programId),
 )
+ipcMain.handle('database:get-study-stats', () => databaseService.getStudyStats())
 ipcMain.handle('database:get-today-plan', () => databaseService.getTodayPlan())
 ipcMain.handle(
   'database:set-units-completed',

@@ -9,6 +9,7 @@ import type {
   ShasPageRecord,
   TodayProgramPlan,
 } from '../main/database'
+import type { StudyStats } from '../main/stats'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitFlags, type UnitTarget } from '../main/progress'
 
 export const TRACTATES_FIXTURE = [
@@ -57,6 +58,10 @@ export type MockBridgeOptions = {
   progressAfterRecalc?: PageProgressRecord[]
   /** Plan returned by getTodayPlan (stateful: setUnitsCompleted updates the units inside it). */
   todayPlan?: TodayProgramPlan[]
+  /** Stats returned by getStudyStats. */
+  studyStats?: StudyStats
+  /** completedAt stamped on a page when its last unit is checked (default: a fixed UTC noon). */
+  completedAtNow?: string
 }
 
 export function mockBridge(options: MockBridgeOptions = {}) {
@@ -65,6 +70,7 @@ export function mockBridge(options: MockBridgeOptions = {}) {
   let progress = options.progress ?? []
   let program = options.program ?? null
   let todayPlan = options.todayPlan ?? []
+  const completedAtNow = options.completedAtNow ?? '2026-11-08 12:00:00'
   const planRows = (plan: TodayProgramPlan) => [...plan.todayPages, ...plan.overduePages]
   const progressProgramId = options.program?.id
   const bridge = {
@@ -96,13 +102,16 @@ export function mockBridge(options: MockBridgeOptions = {}) {
     }),
     getPageProgress: vi.fn(async () => progress.map((row) => ({ ...row, units: { ...row.units } }))),
     getTodayPlan: vi.fn(async () => structuredClone(todayPlan)),
+    getStudyStats: vi.fn(async () => options.studyStats ?? { currentStreak: 0, pagesLast7Days: 0, pagesLast30Days: 0 }),
     setUnitsCompleted: vi.fn(async (programId: number, targets: UnitTarget[], done: boolean) => {
       const applyUnits = (row: PageProgressRecord): PageProgressRecord => {
         const units = { ...row.units }
         for (const target of targets) {
           if (target.pageNumber === row.pageNumber) units[target.unit] = done
         }
-        return { ...row, units, isPageCompleted: isPageComplete(units) }
+        const isPageCompleted = isPageComplete(units)
+        const completedAt = isPageCompleted ? (row.completedAt ?? completedAtNow) : null
+        return { ...row, units, isPageCompleted, completedAt }
       }
       todayPlan = todayPlan.map((plan) =>
         plan.programId === programId
@@ -114,7 +123,9 @@ export function mockBridge(options: MockBridgeOptions = {}) {
         for (const target of targets) {
           if (target.pageNumber === row.pageNumber) units[target.unit] = done
         }
-        return { ...row, units, isPageCompleted: isPageComplete(units) }
+        const isPageCompleted = isPageComplete(units)
+        const completedAt = isPageCompleted ? (row.completedAt ?? completedAtNow) : null
+        return { ...row, units, isPageCompleted, completedAt }
       })
       // Like the real service: finishing every unit completes (and locks) the program.
       if (program && program.id === programId && progress.length > 0 && progress.every((row) => row.isPageCompleted)) {

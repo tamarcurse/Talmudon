@@ -948,3 +948,49 @@ describe('completing programs', () => {
     expect(service.listProgramSummaries('2026-11-10')[0].completedAt).toBe('2026-11-03')
   })
 })
+
+describe('getStudyStats', () => {
+  const input: ProgramInput = {
+    tractateId: 1,
+    programName: 'סטטיסטיקה',
+    startPage: 2,
+    endPage: 6,
+    startDate: '2026-11-01',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-05',
+    restWeekdays: [],
+    restDates: [],
+    restHolidays: [],
+  }
+
+  it('computes the streak and the 7/30-day counts from completed_at', () => {
+    const dbPath = createTestPath('study-stats')
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+    service.initialize()
+    const id = service.createProgram(input)
+    for (const page of [2, 3, 4]) completePage(service, id, page, '2026-11-01')
+    // A partial page must not count.
+    service.setUnitsCompleted(id, [{ pageNumber: 5, unit: 'side_a_rashi' }], true, '2026-11-01')
+
+    const raw = new Database(dbPath)
+    raw.exec("UPDATE page_progress SET completed_at = '2026-11-08 12:00:00' WHERE page_number = 2")
+    raw.exec("UPDATE page_progress SET completed_at = '2026-11-07 12:00:00' WHERE page_number = 3")
+    raw.exec("UPDATE page_progress SET completed_at = '2026-10-01 12:00:00' WHERE page_number = 4")
+    raw.close()
+
+    expect(service.getStudyStats('2026-11-08')).toEqual({
+      currentStreak: 2,
+      pagesLast7Days: 2,
+      pagesLast30Days: 2,
+    })
+  })
+
+  it('is all zeros with no programs', () => {
+    const service = new DatabaseService(createTestPath('study-stats-empty'))
+    testServices.push(service)
+    service.initialize()
+    expect(service.getStudyStats('2026-11-08')).toEqual({ currentStreak: 0, pagesLast7Days: 0, pagesLast30Days: 0 })
+  })
+})

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { PageProgressRecord, ProgramInput, ProgramRecord } from '../../../main/database'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitTarget } from '../../../main/progress'
+import { buildPaceSeries } from '../../../main/stats'
 import { useCalendar } from '../../context/CalendarContext'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import { buildProgressTree } from '../../lib/progressTree'
 import ProgressPie from '../dashboard/ProgressPie'
 import ConfirmDialog from '../layout/ConfirmDialog'
+import PaceChart from './PaceChart'
 import ProgramCalendar from './ProgramCalendar'
 import ProgressTree from './ProgressTree'
 import RecalculateDialog from './RecalculateDialog'
@@ -21,6 +23,11 @@ function localTodayIso(): string {
   const now = new Date()
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+/** Same format as SQLite CURRENT_TIMESTAMP (UTC), matching what the service stores. */
+function utcTimestampNow(): string {
+  return new Date().toISOString().slice(0, 19).replace('T', ' ')
 }
 
 function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
@@ -63,7 +70,9 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
       for (const key of UNIT_KEYS) {
         if (touched.has(`${row.pageNumber}:${key}`)) units[key] = done
       }
-      return { ...row, units, isPageCompleted: isPageComplete(units) }
+      const isPageCompleted = isPageComplete(units)
+      const completedAt = isPageCompleted ? (row.completedAt ?? utcTimestampNow()) : null
+      return { ...row, units, isPageCompleted, completedAt }
     })
     // Optimistic update; a failed save falls back to what the bridge actually holds.
     setRows(next)
@@ -96,6 +105,10 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
   }
 
   const today = localTodayIso()
+  const paceSeries = useMemo(
+    () => (program ? buildPaceSeries({ pages: rows, startDate: program.startDate, today }) : []),
+    [program, rows, today],
+  )
 
   return (
     <>
@@ -126,6 +139,8 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
           </button>
         </div>
       </header>
+
+      <PaceChart series={paceSeries} today={today} />
 
       <div role="group" aria-label="תצוגה" className="mb-4 flex gap-2">
         {(['tree', 'calendar'] as const).map((value) => (

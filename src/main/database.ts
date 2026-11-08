@@ -5,6 +5,7 @@ import { isHolidayId } from './holidays.js'
 import { computeProgramMetrics, type ProgramMetrics } from './metrics.js'
 import { UNIT_KEYS, isPageComplete, isUnitKey, type UnitFlags, type UnitTarget } from './progress.js'
 import { computeEndDate, computePagesPerDay, planSchedule } from './schedule.js'
+import { completedLocalDate, computeStudyStats, type StudyStats } from './stats.js'
 import { TRACTATES_SEED, buildShasPagesSeed } from './seed-data.js'
 
 export type TractateRecord = {
@@ -784,6 +785,30 @@ export class DatabaseService {
         ...metrics,
       }
     })
+  }
+
+  /** Streak and 7/30-day page counts across all programs. */
+  getStudyStats(today: string = localToday()): StudyStats {
+    if (!isValidIsoDate(today)) {
+      throw new Error(`Invalid date: ${String(today)}`)
+    }
+    const db = this.ensureDatabase()
+    const rows = db.prepare('SELECT id, status FROM study_programs ORDER BY id ASC').all() as Array<{
+      id: number
+      status: ProgramStatus
+    }>
+    const programs = rows.map((row) => {
+      const program = this.getProgram(row.id) as ProgramRecord
+      const completionDates = this.getPageProgress(row.id)
+        .filter((page) => page.isPageCompleted)
+        .flatMap((page) => completedLocalDate(page.completedAt) ?? [])
+      return {
+        status: row.status,
+        rest: { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays },
+        completionDates,
+      }
+    })
+    return computeStudyStats({ programs, today })
   }
 
   getTodayPlan(today: string = localToday()): TodayProgramPlan[] {

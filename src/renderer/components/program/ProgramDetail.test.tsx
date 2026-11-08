@@ -387,3 +387,19 @@ describe('completed program', () => {
     expect(bridge.getProgram).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('pace chart', () => {
+  it('shows the chart with a summary and updates after a page is fully checked off', async () => {
+    await renderDetail()
+    expect(screen.getByRole('img', { name: /גרף קצב לימוד/ })).toBeInTheDocument()
+    expect(screen.getByText(/^נלמדו 0 מתוך \d+ דפים מתוכננים עד היום$/)).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: /דף ג/ }))
+    expect(await screen.findByText(/^נלמדו 1 מתוך \d+ דפים מתוכננים עד היום$/)).toBeInTheDocument()
+  })
+
+  it('is hidden for a program with no pages', async () => {
+    await renderDetail({ progress: [] })
+    expect(screen.queryByRole('img', { name: /גרף קצב לימוד/ })).not.toBeInTheDocument()
+  })
+})
