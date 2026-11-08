@@ -57,6 +57,18 @@ ipcMain.handle('database:update-program', (_event, id: number, input: ProgramInp
 )
 ipcMain.handle('database:get-program', (_event, id: number) => databaseService.getProgram(id))
 
+ipcMain.handle('database:recalculate-program', (_event, id: number) =>
+  databaseService.recalculateProgram(id),
+)
+ipcMain.handle('database:get-page-progress', (_event, programId: number) =>
+  databaseService.getPageProgress(programId),
+)
+ipcMain.handle(
+  'database:set-page-completed',
+  (_event, programId: number, pageNumber: number, completed: boolean) =>
+    databaseService.setPageCompleted(programId, pageNumber, completed),
+)
+
 app.whenReady().then(() => {
   databaseService.initialize()
   createWindow()

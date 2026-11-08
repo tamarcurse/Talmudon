@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { computeEndDate, computePagesPerDay, countDafim, isStudyDay } from './schedule'
+import { computeEndDate, computePagesPerDay, countDafim, isStudyDay, planSchedule } from './schedule.js'
 
 const NO_REST = { weekdays: [], dates: [] }
 
@@ -148,5 +148,57 @@ describe('computePagesPerDay', () => {
         rest: { weekdays: [0, 1, 2, 3, 4, 5, 6], dates: [] },
       }),
     ).toThrow()
+  })
+})
+
+describe('planSchedule', () => {
+  const dates = (plan: Array<{ date: string }>) => plan.map((p) => p.date)
+
+  it('puts one page per day with no rest days', () => {
+    const plan = planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 1, rest: NO_REST })
+    expect(plan).toEqual([
+      { page: 2, date: '2026-01-01' },
+      { page: 3, date: '2026-01-02' },
+      { page: 4, date: '2026-01-03' },
+    ])
+  })
+
+  it('skips Friday and Saturday', () => {
+    const plan = planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 1, rest: { weekdays: [5, 6], dates: [] } })
+    expect(dates(plan)).toEqual(['2026-01-01', '2026-01-04', '2026-01-05'])
+  })
+
+  it('skips an excluded date', () => {
+    const plan = planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 1, rest: { weekdays: [], dates: ['2026-01-02'] } })
+    expect(dates(plan)).toEqual(['2026-01-01', '2026-01-03', '2026-01-04'])
+  })
+
+  it('handles 0.5 pages per day, counting only study days', () => {
+    expect(dates(planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 0.5, rest: NO_REST }))).toEqual([
+      '2026-01-01', '2026-01-03', '2026-01-05',
+    ])
+    // Saturday (01-03) is rest: study days are 01-01, 01-02, 01-04, 01-05, 01-06; pages land on days 0, 2, 4
+    expect(
+      dates(planSchedule({ pages: [2, 3, 4], startDate: '2026-01-01', pagesPerDay: 0.5, rest: { weekdays: [6], dates: [] } })),
+    ).toEqual(['2026-01-01', '2026-01-04', '2026-01-06'])
+  })
+
+  it('handles 2 pages per day', () => {
+    expect(dates(planSchedule({ pages: [2, 3, 4, 5], startDate: '2026-01-01', pagesPerDay: 2, rest: NO_REST }))).toEqual([
+      '2026-01-01', '2026-01-01', '2026-01-02', '2026-01-02',
+    ])
+  })
+
+  it('alternates 2,1,2,1 for 1.5 and ends on computeEndDate', () => {
+    const pages = [2, 3, 4, 5, 6, 7]
+    const plan = planSchedule({ pages, startDate: '2026-01-01', pagesPerDay: 1.5, rest: NO_REST })
+    expect(dates(plan)).toEqual(['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-03', '2026-01-03', '2026-01-04'])
+    expect(plan[5].date).toBe(computeEndDate({ startDate: '2026-01-01', totalDafim: 6, pagesPerDay: 1.5, rest: NO_REST }))
+  })
+
+  it('returns [] for no pages and throws on bad input', () => {
+    expect(planSchedule({ pages: [], startDate: '2026-01-01', pagesPerDay: 1, rest: NO_REST })).toEqual([])
+    expect(() => planSchedule({ pages: [2], startDate: '2026-01-01', pagesPerDay: 1, rest: { weekdays: [0, 1, 2, 3, 4, 5, 6], dates: [] } })).toThrow()
+    expect(() => planSchedule({ pages: [2], startDate: '2026-01-01', pagesPerDay: 0, rest: NO_REST })).toThrow()
   })
 })

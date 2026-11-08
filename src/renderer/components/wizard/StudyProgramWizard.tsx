@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import type { PaceMode, ProgramInput } from '../../../main/database'
 import { useCalendar } from '../../context/CalendarContext'
 import { formatIsoDate } from '../../lib/hebrewDate'
-import { computeEndDate, computePagesPerDay, countDafim } from '../../lib/schedule'
+import { computeEndDate, computePagesPerDay, countDafim } from '../../../main/schedule'
 import DateField from './DateField'
 
 type Tractate = { id: number; name_he: string; name_en: string; total_pages: number }

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { computeEndDate, computePagesPerDay, planSchedule } from './schedule.js'
 import { TRACTATES_SEED, buildShasPagesSeed } from './seed-data.js'
 
 export type TractateRecord = {
@@ -45,6 +46,13 @@ export type ProgramInput = {
 
 export type ProgramRecord = ProgramInput & { id: number }
 
+export type PageProgressRecord = {
+  id: number
+  pageNumber: number
+  scheduledDate: string
+  isPageCompleted: boolean
+}
+
 type SqliteDatabase = InstanceType<typeof Database>
 
 const ALLOWED_TABLE_NAMES = new Set([
@@ -75,8 +83,22 @@ const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> =
   { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
 ]
 
+const PAGE_PROGRESS_MIGRATIONS: Array<{ column: string; definition: string }> = [
+  { column: 'is_page_completed', definition: 'is_page_completed BOOLEAN NOT NULL DEFAULT 0' },
+]
+
 const MIN_PAGE_NUMBER = 2
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function pageRange(start: number, end: number): number[] {
+  return Array.from({ length: end - start + 1 }, (_, i) => start + i)
+}
+
+function localToday(): string {
+  const now = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
 
 function isValidIsoDate(value: unknown): value is string {
   if (typeof value !== 'string') {
@@ -178,6 +200,7 @@ export class DatabaseService {
     db.exec(SCHEMA_SQL)
     this.migrateUserSettings()
     this.migrateStudyPrograms()
+    this.applyColumnMigrations('page_progress', PAGE_PROGRESS_MIGRATIONS)
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -189,7 +212,7 @@ export class DatabaseService {
   }
 
   private applyColumnMigrations(
-    table: 'user_settings' | 'study_programs',
+    table: 'user_settings' | 'study_programs' | 'page_progress',
     migrations: Array<{ column: string; definition: string }>,
   ): void {
     const db = this.ensureDatabase()
@@ -357,13 +380,14 @@ export class DatabaseService {
         )
       const programId = Number(result.lastInsertRowid)
       this.replaceRestDays(programId, input)
+      this.insertInitialPageProgress(programId, input)
       return programId
     })
 
     return save()
   }
 
-  updateProgram(id: number, input: ProgramInput): void {
+  updateProgram(id: number, input: ProgramInput, today: string = localToday()): void {
     this.validateProgramInput(input)
     const db = this.ensureDatabase()
 
@@ -390,9 +414,132 @@ export class DatabaseService {
         throw new Error(`Unknown program: ${id}`)
       }
       this.replaceRestDays(id, input)
+      this.recalculateInTransaction(id, today)
     })
 
     save()
+  }
+
+  recalculateProgram(id: number, today: string = localToday()): void {
+    const db = this.ensureDatabase()
+    db.transaction(() => this.recalculateInTransaction(id, today))()
+  }
+
+  private insertInitialPageProgress(programId: number, input: ProgramInput): void {
+    const db = this.ensureDatabase()
+    const plan = planSchedule({
+      pages: pageRange(input.startPage, input.endPage),
+      startDate: input.startDate,
+      pagesPerDay: input.pagesPerDay,
+      rest: { weekdays: input.restWeekdays, dates: input.restDates },
+    })
+    const insert = db.prepare(
+      'INSERT INTO page_progress (program_id, page_number, scheduled_date) VALUES (?, ?, ?)',
+    )
+    for (const { page, date } of plan) {
+      insert.run(programId, page, date)
+    }
+  }
+
+  private recalculateInTransaction(id: number, today: string): void {
+    const db = this.ensureDatabase()
+    const program = this.getProgram(id)
+    if (!program) {
+      throw new Error(`Unknown program: ${id}`)
+    }
+    if (!isValidIsoDate(today)) {
+      throw new Error(`Invalid date: ${String(today)}`)
+    }
+
+    const rows = db
+      .prepare('SELECT id, page_number, is_page_completed FROM page_progress WHERE program_id = ?')
+      .all(id) as Array<{ id: number; page_number: number; is_page_completed: number }>
+    const completed = new Set(rows.filter((r) => r.is_page_completed).map((r) => r.page_number))
+    const pendingIds = new Map(rows.filter((r) => !r.is_page_completed).map((r) => [r.page_number, r.id]))
+
+    const remaining = pageRange(program.startPage, program.endPage).filter((page) => !completed.has(page))
+
+    // Pending rows that fell out of the range are dropped; completed rows are never touched.
+    const inRange = new Set(remaining)
+    const deleteRow = db.prepare('DELETE FROM page_progress WHERE id = ?')
+    for (const [page, rowId] of pendingIds) {
+      if (!inRange.has(page)) {
+        deleteRow.run(rowId)
+      }
+    }
+    if (remaining.length === 0) {
+      return
+    }
+
+    const startDate = today > program.startDate ? today : program.startDate
+    const rest = { weekdays: program.restWeekdays, dates: program.restDates }
+    let pagesPerDay = program.pagesPerDay
+    let targetEndDate = program.targetEndDate
+    if (program.paceMode === 'target_date') {
+      pagesPerDay = computePagesPerDay({
+        startDate,
+        targetEndDate: program.targetEndDate,
+        totalDafim: remaining.length,
+        rest,
+      })
+    } else {
+      targetEndDate = computeEndDate({ startDate, totalDafim: remaining.length, pagesPerDay, rest })
+    }
+
+    const plan = planSchedule({ pages: remaining, startDate, pagesPerDay, rest })
+    const update = db.prepare('UPDATE page_progress SET scheduled_date = ? WHERE id = ?')
+    const insert = db.prepare(
+      'INSERT INTO page_progress (program_id, page_number, scheduled_date) VALUES (?, ?, ?)',
+    )
+    for (const { page, date } of plan) {
+      const rowId = pendingIds.get(page)
+      if (rowId === undefined) {
+        insert.run(id, page, date)
+      } else {
+        update.run(date, rowId)
+      }
+    }
+
+    db.prepare('UPDATE study_programs SET pages_per_day = ?, target_end_date = ? WHERE id = ?').run(
+      pagesPerDay,
+      targetEndDate,
+      id,
+    )
+  }
+
+  getPageProgress(programId: number): PageProgressRecord[] {
+    const db = this.ensureDatabase()
+    const rows = db
+      .prepare(
+        `SELECT id, page_number, scheduled_date, is_page_completed FROM page_progress
+          WHERE program_id = ? ORDER BY page_number ASC`,
+      )
+      .all(programId) as Array<{
+      id: number
+      page_number: number
+      scheduled_date: string
+      is_page_completed: number
+    }>
+    return rows.map((row) => ({
+      id: row.id,
+      pageNumber: row.page_number,
+      scheduledDate: row.scheduled_date,
+      isPageCompleted: Boolean(row.is_page_completed),
+    }))
+  }
+
+  setPageCompleted(programId: number, pageNumber: number, completed: boolean): void {
+    const db = this.ensureDatabase()
+    const result = db
+      .prepare(
+        `UPDATE page_progress
+            SET is_page_completed = ?, completed_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE NULL END
+          WHERE program_id = ? AND page_number = ?`,
+      )
+      .run(completed ? 1 : 0, completed ? 1 : 0, programId, pageNumber)
+    if (result.changes === 0) {
+      throw new Error(`Unknown page ${pageNumber} in program ${programId}`)
+    }
   }
 
   getProgram(id: number): ProgramRecord | null {

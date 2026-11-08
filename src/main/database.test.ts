@@ -252,9 +252,10 @@ describe('programs API', () => {
       restWeekdays: [0],
       restDates: [],
     }
-    service.updateProgram(id, updated)
+    service.updateProgram(id, updated, baseInput.startDate)
 
-    expect(service.getProgram(id)).toEqual({ id, ...updated })
+    // pagesPerDay is derived from the target date in target_date mode, so only check it is set.
+    expect(service.getProgram(id)).toEqual({ id, ...updated, pagesPerDay: expect.any(Number) })
     expect(service.getRowCount('program_rest_days')).toBe(1)
     expect(service.getRowCount('study_programs')).toBe(1)
   })
@@ -331,5 +332,134 @@ describe('programs API', () => {
 
     const id = service.createProgram(baseInput)
     expect(service.getProgram(id)).toEqual({ id, ...baseInput })
+  })
+})
+
+describe('page_progress schedule', () => {
+  const baseInput: ProgramInput = {
+    tractateId: 1,
+    programName: 'ברכות',
+    startPage: 2,
+    endPage: 5,
+    startDate: '2026-01-01', // Thursday
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-01-04',
+    restWeekdays: [],
+    restDates: [],
+  }
+
+  function setup() {
+    const service = new DatabaseService(createTestPath('progress'))
+    testServices.push(service)
+    service.initialize()
+    return service
+  }
+
+  const dates = (service: DatabaseService, id: number) =>
+    service.getPageProgress(id).map((p) => p.scheduledDate)
+
+  it('createProgram creates a not-completed ISO-dated record for every page', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    const progress = service.getPageProgress(id)
+    expect(progress.map((p) => p.pageNumber)).toEqual([2, 3, 4, 5])
+    expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'])
+    expect(progress.every((p) => !p.isPageCompleted)).toBe(true)
+  })
+
+  it('createProgram skips rest weekdays', () => {
+    const service = setup()
+    const id = service.createProgram({ ...baseInput, restWeekdays: [5, 6] })
+    expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-04', '2026-01-05', '2026-01-06'])
+  })
+
+  it('setPageCompleted marks and unmarks a page', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setPageCompleted(id, 3, true)
+    expect(service.getPageProgress(id).find((p) => p.pageNumber === 3)?.isPageCompleted).toBe(true)
+    service.setPageCompleted(id, 3, false)
+    expect(service.getPageProgress(id).find((p) => p.pageNumber === 3)?.isPageCompleted).toBe(false)
+  })
+
+  it('recalc keeps completed dates and moves the rest to today', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setPageCompleted(id, 2, true)
+    service.setPageCompleted(id, 3, true)
+    service.recalculateProgram(id, '2026-01-05')
+    expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-02', '2026-01-05', '2026-01-06'])
+  })
+
+  it('recalc moves an overdue page to today', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.recalculateProgram(id, '2026-01-03')
+    expect(dates(service, id)).toEqual(['2026-01-03', '2026-01-04', '2026-01-05', '2026-01-06'])
+  })
+
+  it('updateProgram with a new daily pace reschedules and updates the end date', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.updateProgram(id, { ...baseInput, pagesPerDay: 2 }, '2026-01-01')
+    expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-02'])
+    expect(service.getProgram(id)?.targetEndDate).toBe('2026-01-02')
+  })
+
+  it('updateProgram with a new target date updates pages per day', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.updateProgram(
+      id,
+      { ...baseInput, paceMode: 'target_date', targetEndDate: '2026-01-02' },
+      '2026-01-01',
+    )
+    expect(service.getProgram(id)?.pagesPerDay).toBe(2)
+    expect(dates(service, id)).toEqual(['2026-01-01', '2026-01-01', '2026-01-02', '2026-01-02'])
+  })
+
+  it('updateProgram rejects a target date before today and rolls back', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    expect(() =>
+      service.updateProgram(id, { ...baseInput, paceMode: 'target_date', targetEndDate: '2026-01-02' }, '2026-01-10'),
+    ).toThrow()
+    expect(service.getProgram(id)?.paceMode).toBe('daily_pace')
+    expect(dates(service, id)[0]).toBe('2026-01-01')
+  })
+
+  it('updateProgram with new rest days skips them', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.updateProgram(id, { ...baseInput, restWeekdays: [4] }, '2026-01-01')
+    expect(dates(service, id)).toEqual(['2026-01-02', '2026-01-03', '2026-01-04', '2026-01-05'])
+  })
+
+  it('expanding the range adds pages; shrinking drops only pending ones', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.updateProgram(id, { ...baseInput, endPage: 6 }, '2026-01-01')
+    expect(service.getPageProgress(id).map((p) => p.pageNumber)).toEqual([2, 3, 4, 5, 6])
+
+    service.setPageCompleted(id, 6, true)
+    service.updateProgram(id, { ...baseInput, endPage: 4 }, '2026-01-01')
+    expect(service.getPageProgress(id).map((p) => p.pageNumber)).toEqual([2, 3, 4, 6])
+    expect(service.getPageProgress(id).find((p) => p.pageNumber === 6)?.isPageCompleted).toBe(true)
+  })
+
+  it('keeps record ids across recalc', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    const before = service.getPageProgress(id).map((p) => p.id)
+    service.recalculateProgram(id, '2026-01-03')
+    expect(service.getPageProgress(id).map((p) => p.id)).toEqual(before)
+  })
+
+  it('does not pull a not-yet-started program back to today', () => {
+    const service = setup()
+    const id = service.createProgram({ ...baseInput, startDate: '2026-03-02' })
+    service.recalculateProgram(id, '2026-01-01')
+    expect(dates(service, id)[0]).toBe('2026-03-02')
   })
 })

@@ -34,6 +34,9 @@ export function mockBridge(options: MockBridgeOptions = {}) {
     getShasPages: vi.fn().mockResolvedValue(options.pages ?? buildPagesFixture()),
     getProgram: vi.fn().mockResolvedValue(options.program ?? null),
     createProgram: vi.fn<(input: ProgramInput) => Promise<number>>().mockResolvedValue(options.createdProgramId ?? 1),
+    recalculateProgram: vi.fn().mockResolvedValue(undefined),
+    getPageProgress: vi.fn().mockResolvedValue([]),
+    setPageCompleted: vi.fn().mockResolvedValue(undefined),
     updateProgram: vi.fn<(id: number, input: ProgramInput) => Promise<void>>().mockResolvedValue(undefined),
   }
   window.talmudonBridge = bridge as unknown as Window['talmudonBridge']

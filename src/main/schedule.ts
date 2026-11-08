@@ -98,3 +98,43 @@ export function computePagesPerDay(params: {
   }
   return totalDafim / studyDays
 }
+
+/**
+ * Spread `pages` over study days starting at `startDate`. Page i (from 0) lands on the
+ * study day ⌊i / pagesPerDay⌋, so the last page lands exactly on `computeEndDate`.
+ */
+export function planSchedule(params: {
+  pages: number[]
+  startDate: string
+  pagesPerDay: number
+  rest: RestRules
+}): Array<{ page: number; date: string }> {
+  const { pages, startDate, pagesPerDay, rest } = params
+  if (!(pagesPerDay > 0)) {
+    throw new Error('Pages per day must be greater than zero')
+  }
+  if (allWeekdaysAreRest(rest)) {
+    throw new Error('There are no study days: every weekday is a rest day')
+  }
+  if (pages.length === 0) {
+    return []
+  }
+
+  const plan: Array<{ page: number; date: string }> = []
+  let time = parseIso(startDate)
+  let studyDayIndex = -1
+  pages.forEach((page, i) => {
+    const targetDay = Math.floor(i / pagesPerDay + 1e-9)
+    while (studyDayIndex < targetDay) {
+      if (studyDayIndex >= 0) {
+        time += DAY_MS
+      }
+      while (!isStudyTime(time, rest)) {
+        time += DAY_MS
+      }
+      studyDayIndex += 1
+    }
+    plan.push({ page, date: toIso(time) })
+  })
+  return plan
+}
