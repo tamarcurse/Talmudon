@@ -108,3 +108,39 @@ input[type='radio'] {
     @apply bg-canvas text-muted;
   }
 }
+
+/* Completion celebration */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop-in {
+  0% { opacity: 0; transform: translateY(24px) scale(0.92); }
+  60% { opacity: 1; transform: translateY(-4px) scale(1.02); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes confetti-fall {
+  0% { opacity: 0; transform: translate3d(0, -20px, 0) rotate(0deg); }
+  10% { opacity: 1; }
+  100% { opacity: 0; transform: translate3d(var(--drift), 420px, 0) rotate(var(--spin)); }
+}
+@keyframes badge-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(245 158 11 / 0.45); }
+  50% { box-shadow: 0 0 0 14px rgb(245 158 11 / 0); }
+}
+.anim-fade-in { animation: fade-in 0.25s ease-out both; }
+.anim-pop-in { animation: pop-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both; }
+.anim-rise-in { animation: rise-in 0.5s ease-out both; }
+.anim-badge-glow { animation: badge-glow 2.2s ease-in-out 0.6s infinite; }
+.confetti-piece { animation: confetti-fall var(--dur) ease-in var(--delay) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .anim-fade-in, .anim-pop-in, .anim-rise-in, .anim-badge-glow, .confetti-piece {
+    animation: none;
+  }
+  .confetti-piece { display: none; }
+}

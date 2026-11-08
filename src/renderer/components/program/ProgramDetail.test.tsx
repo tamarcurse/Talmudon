@@ -403,3 +403,75 @@ describe('pace chart', () => {
     expect(screen.queryByRole('img', { name: /גרף קצב לימוד/ })).not.toBeInTheDocument()
   })
 })
+
+describe('completion', () => {
+  const LAST_PAGE = [
+    { ...progressRow(2, '2026-11-08', ALL_DONE), completedAt: '2026-11-01 12:00:00' },
+    progressRow(3, '2026-11-08', { side_a_rashi: true, side_a_tosafot: true, side_b_rashi: true }),
+  ]
+  const tickLast = () => {
+    expand("ג'")
+    fireEvent.click(screen.getByRole('checkbox', { name: "דף ג' עמוד ב' תוספות" }))
+  }
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('opens the dialog when the last unit is ticked', async () => {
+    await renderDetail({ progress: LAST_PAGE })
+    tickLast()
+    expect(await screen.findByRole('dialog', { name: 'סיום מסכת שבת!' })).toBeInTheDocument()
+  })
+
+  it('shows start date, end date (today) and the duration', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-20T12:00:00'))
+    await renderDetail({ progress: LAST_PAGE })
+    tickLast()
+    const dialog = await screen.findByRole('dialog', { name: 'סיום מסכת שבת!' })
+
+    expect(within(dialog).getByText(formatIsoDate('2026-11-01', 'gregorian'))).toBeInTheDocument()
+    expect(within(dialog).getByText(formatIsoDate('2026-11-20', 'gregorian'))).toBeInTheDocument()
+    expect(within(dialog).getByText('20 ימים')).toBeInTheDocument()
+  })
+
+  it('shows the hadran with the tractate name', async () => {
+    await renderDetail({ progress: LAST_PAGE })
+    tickLast()
+    const dialog = await screen.findByRole('dialog', { name: 'סיום מסכת שבת!' })
+    expect(within(dialog).getByText(/הדרן עלך מסכת שבת והדרך עלן/)).toBeInTheDocument()
+  })
+
+  it('does not open when loading a program that is already 100%', async () => {
+    await renderDetail({ progress: [progressRow(3, '2026-11-08', ALL_DONE)] })
+    await screen.findByRole('img', { name: 'הושלמו 100%' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('does not open when ticking short of 100%', async () => {
+    await renderDetail({ progress: TWO_PAGES })
+    fireEvent.click(screen.getByRole('checkbox', { name: "דף ב'" }))
+    await screen.findByRole('img', { name: 'הושלמו 50%' })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('closes with סגירה', async () => {
+    await renderDetail({ progress: LAST_PAGE, program: { ...PROGRAM, status: 'active' } })
+    tickLast()
+    await screen.findByRole('dialog')
+    fireEvent.click(screen.getByRole('button', { name: 'סגירה' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('closes the dialog when the save fails', async () => {
+    const { bridge } = await renderDetail({ progress: LAST_PAGE })
+    let rejectSave: (error: Error) => void = () => {}
+    bridge.setUnitsCompleted.mockImplementationOnce(() => new Promise((_, reject) => (rejectSave = reject)))
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    tickLast()
+    await screen.findByRole('dialog')
+    rejectSave(new Error('boom'))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+  })
+})

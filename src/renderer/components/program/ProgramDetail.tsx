@@ -3,10 +3,12 @@ import type { PageProgressRecord, ProgramInput, ProgramRecord } from '../../../m
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitTarget } from '../../../main/progress'
 import { buildPaceSeries } from '../../../main/stats'
 import { useCalendar } from '../../context/CalendarContext'
+import { completionSummary, type CompletionSummary } from '../../lib/completionSummary'
 import { formatIsoDate } from '../../lib/hebrewDate'
 import { buildProgressTree } from '../../lib/progressTree'
 import ProgressPie from '../dashboard/ProgressPie'
 import ConfirmDialog from '../layout/ConfirmDialog'
+import CompletionDialog from './CompletionDialog'
 import PaceChart from './PaceChart'
 import ProgramCalendar from './ProgramCalendar'
 import ProgressTree from './ProgressTree'
@@ -36,6 +38,7 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
   const [rows, setRows] = useState<PageProgressRecord[]>([])
   const [recalculating, setRecalculating] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [completion, setCompletion] = useState<{ summary: CompletionSummary; tractateName: string } | null>(null)
   const [view, setView] = useState<'tree' | 'calendar'>('tree')
 
   const reloadRows = useCallback(async () => {
@@ -62,6 +65,14 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
   const percent = unitPercent(rows)
   const isCompleted = program?.status === 'completed'
 
+  async function showCompletion(completedRows: PageProgressRecord[]) {
+    const summary = completionSummary(completedRows, localTodayIso())
+    if (!summary || !program) return
+    const tractates = await window.talmudonBridge.getTractates()
+    const tractateName = tractates.find((tractate) => tractate.id === program.tractateId)?.name_he ?? ''
+    setCompletion({ summary, tractateName })
+  }
+
   async function setUnits(targets: UnitTarget[], done: boolean) {
     if (isCompleted) return
     const touched = new Set(targets.map((target) => `${target.pageNumber}:${target.unit}`))
@@ -76,12 +87,15 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
     })
     // Optimistic update; a failed save falls back to what the bridge actually holds.
     setRows(next)
+    // Detected here (not in an effect) so loading an already-complete program never celebrates.
+    if (unitPercent(rows) < 100 && unitPercent(next) === 100) void showCompletion(next)
     try {
       await window.talmudonBridge.setUnitsCompleted(programId, targets, done)
       // Marking the last unit completes the program on the backend; reload to show it locked.
       if (unitPercent(next) === 100) setProgram(await window.talmudonBridge.getProgram(programId))
     } catch (error) {
       console.error('Failed to save progress', error)
+      setCompletion(null)
       await reloadRows()
     }
   }
@@ -170,6 +184,15 @@ function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
           cancelLabel="ביטול"
           onConfirm={() => void confirmDelete()}
           onCancel={() => setConfirmingDelete(false)}
+        />
+      )}
+
+      {completion && program && (
+        <CompletionDialog
+          programName={program.programName}
+          tractateName={completion.tractateName}
+          summary={completion.summary}
+          onClose={() => setCompletion(null)}
         />
       )}
 
