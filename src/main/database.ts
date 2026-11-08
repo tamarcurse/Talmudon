@@ -27,6 +27,24 @@ export type StudyProgramRecord = {
   created_at: string | null
 }
 
+export const PACE_MODES = ['target_date', 'daily_pace'] as const
+export type PaceMode = (typeof PACE_MODES)[number]
+
+export type ProgramInput = {
+  tractateId: number
+  programName: string
+  startPage: number
+  endPage: number
+  startDate: string
+  paceMode: PaceMode
+  pagesPerDay: number
+  targetEndDate: string
+  restWeekdays: number[]
+  restDates: string[]
+}
+
+export type ProgramRecord = ProgramInput & { id: number }
+
 type SqliteDatabase = InstanceType<typeof Database>
 
 const ALLOWED_TABLE_NAMES = new Set([
@@ -52,6 +70,25 @@ const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = 
   { column: 'calendar_type', definition: "calendar_type TEXT NOT NULL DEFAULT 'gregorian'" },
 ]
 
+const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> = [
+  { column: 'start_date', definition: 'start_date TEXT' },
+  { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
+]
+
+const MIN_PAGE_NUMBER = 2
+const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function isValidIsoDate(value: unknown): value is string {
+  if (typeof value !== 'string') {
+    return false
+  }
+  const match = ISO_DATE_PATTERN.exec(value)
+  if (!match) {
+    return false
+  }
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  return date.toISOString().slice(0, 10) === value
+}
 
 const SCHEMA_SQL = `
 PRAGMA foreign_keys = ON;
@@ -140,6 +177,7 @@ export class DatabaseService {
     const db = this.ensureDatabase()
     db.exec(SCHEMA_SQL)
     this.migrateUserSettings()
+    this.migrateStudyPrograms()
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -150,16 +188,27 @@ export class DatabaseService {
     this.db = null
   }
 
-  private migrateUserSettings(): void {
+  private applyColumnMigrations(
+    table: 'user_settings' | 'study_programs',
+    migrations: Array<{ column: string; definition: string }>,
+  ): void {
     const db = this.ensureDatabase()
-    const columns = db.prepare('PRAGMA table_info(user_settings)').all() as Array<{ name: string }>
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>
     const existing = new Set(columns.map((column) => column.name))
 
-    for (const migration of USER_SETTINGS_MIGRATIONS) {
+    for (const migration of migrations) {
       if (!existing.has(migration.column)) {
-        db.exec(`ALTER TABLE user_settings ADD COLUMN ${migration.definition}`)
+        db.exec(`ALTER TABLE ${table} ADD COLUMN ${migration.definition}`)
       }
     }
+  }
+
+  private migrateUserSettings(): void {
+    this.applyColumnMigrations('user_settings', USER_SETTINGS_MIGRATIONS)
+  }
+
+  private migrateStudyPrograms(): void {
+    this.applyColumnMigrations('study_programs', STUDY_PROGRAMS_MIGRATIONS)
   }
 
   private seedTractates(): void {
@@ -185,19 +234,18 @@ export class DatabaseService {
 
   private seedShasPages(): void {
     const db = this.ensureDatabase()
-    const existing = db.prepare('SELECT COUNT(*) AS total FROM shas_pages').get() as { total: number }
 
-    if (existing.total > 0) {
-      return
-    }
-
-    const insert = db.prepare(
-      `INSERT INTO shas_pages (page_number, page_label_he) VALUES (@page_number, @page_label_he)`,
+    // Upsert rather than skip when rows exist: databases seeded by an older version carry
+    // wrong labels (single letters cycling), and seeding must repair them.
+    const upsert = db.prepare(
+      `INSERT INTO shas_pages (page_number, page_label_he) VALUES (@page_number, @page_label_he)
+       ON CONFLICT(page_number) DO UPDATE SET page_label_he = excluded.page_label_he
+       WHERE page_label_he <> excluded.page_label_he`,
     )
 
     const transaction = db.transaction(() => {
       for (const page of buildShasPagesSeed()) {
-        insert.run(page)
+        upsert.run(page)
       }
     })
 
@@ -209,6 +257,194 @@ export class DatabaseService {
     return db
       .prepare(`SELECT id, name_he, name_en, total_pages FROM tractates ORDER BY id ASC`)
       .all() as TractateRecord[]
+  }
+
+  getShasPages(): ShasPageRecord[] {
+    const db = this.ensureDatabase()
+    return db
+      .prepare('SELECT page_number, page_label_he FROM shas_pages ORDER BY page_number ASC')
+      .all() as ShasPageRecord[]
+  }
+
+  private validateProgramInput(input: ProgramInput): void {
+    const db = this.ensureDatabase()
+
+    if (typeof input.programName !== 'string' || input.programName.trim() === '') {
+      throw new Error('Program name is required')
+    }
+
+    const tractate = db
+      .prepare('SELECT total_pages FROM tractates WHERE id = ?')
+      .get(input.tractateId) as { total_pages: number } | undefined
+    if (!tractate) {
+      throw new Error(`Unknown tractate: ${String(input.tractateId)}`)
+    }
+
+    if (!Number.isInteger(input.startPage) || !Number.isInteger(input.endPage)) {
+      throw new Error('Start and end pages must be integers')
+    }
+    if (input.startPage < MIN_PAGE_NUMBER || input.startPage > input.endPage || input.endPage > tractate.total_pages) {
+      throw new Error(
+        `Invalid page range ${input.startPage}-${input.endPage}; must satisfy ${MIN_PAGE_NUMBER} <= start <= end <= ${tractate.total_pages}`,
+      )
+    }
+
+    if (!(PACE_MODES as readonly unknown[]).includes(input.paceMode)) {
+      throw new Error(`Invalid pace mode: ${String(input.paceMode)}`)
+    }
+    if (typeof input.pagesPerDay !== 'number' || !Number.isFinite(input.pagesPerDay) || input.pagesPerDay <= 0) {
+      throw new Error('Pages per day must be a positive number')
+    }
+
+    if (!isValidIsoDate(input.startDate)) {
+      throw new Error(`Invalid start date: ${String(input.startDate)}`)
+    }
+    if (!isValidIsoDate(input.targetEndDate)) {
+      throw new Error(`Invalid target end date: ${String(input.targetEndDate)}`)
+    }
+
+    for (const weekday of input.restWeekdays) {
+      if (!Number.isInteger(weekday) || weekday < 0 || weekday > 6) {
+        throw new Error(`Invalid rest weekday: ${String(weekday)}`)
+      }
+    }
+    for (const date of input.restDates) {
+      if (!isValidIsoDate(date)) {
+        throw new Error(`Invalid rest date: ${String(date)}`)
+      }
+    }
+  }
+
+  private replaceRestDays(programId: number, input: ProgramInput): void {
+    const db = this.ensureDatabase()
+    db.prepare('DELETE FROM program_rest_days WHERE program_id = ?').run(programId)
+
+    const insertWeekday = db.prepare(
+      "INSERT INTO program_rest_days (program_id, rest_type, day_of_week) VALUES (?, 'weekday', ?)",
+    )
+    const insertDate = db.prepare(
+      "INSERT INTO program_rest_days (program_id, rest_type, specific_date) VALUES (?, 'date', ?)",
+    )
+    for (const weekday of new Set(input.restWeekdays)) {
+      insertWeekday.run(programId, weekday)
+    }
+    for (const date of new Set(input.restDates)) {
+      insertDate.run(programId, date)
+    }
+  }
+
+  createProgram(input: ProgramInput): number {
+    this.validateProgramInput(input)
+    const db = this.ensureDatabase()
+
+    const save = db.transaction(() => {
+      const result = db
+        .prepare(
+          `INSERT INTO study_programs
+             (tractate_id, program_name, start_page_num, end_page_num, target_end_date,
+              pages_per_day, start_date, pace_mode)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          input.tractateId,
+          input.programName.trim(),
+          input.startPage,
+          input.endPage,
+          input.targetEndDate,
+          input.pagesPerDay,
+          input.startDate,
+          input.paceMode,
+        )
+      const programId = Number(result.lastInsertRowid)
+      this.replaceRestDays(programId, input)
+      return programId
+    })
+
+    return save()
+  }
+
+  updateProgram(id: number, input: ProgramInput): void {
+    this.validateProgramInput(input)
+    const db = this.ensureDatabase()
+
+    const save = db.transaction(() => {
+      const result = db
+        .prepare(
+          `UPDATE study_programs
+              SET tractate_id = ?, program_name = ?, start_page_num = ?, end_page_num = ?,
+                  target_end_date = ?, pages_per_day = ?, start_date = ?, pace_mode = ?
+            WHERE id = ?`,
+        )
+        .run(
+          input.tractateId,
+          input.programName.trim(),
+          input.startPage,
+          input.endPage,
+          input.targetEndDate,
+          input.pagesPerDay,
+          input.startDate,
+          input.paceMode,
+          id,
+        )
+      if (result.changes === 0) {
+        throw new Error(`Unknown program: ${id}`)
+      }
+      this.replaceRestDays(id, input)
+    })
+
+    save()
+  }
+
+  getProgram(id: number): ProgramRecord | null {
+    const db = this.ensureDatabase()
+    const row = db
+      .prepare(
+        `SELECT id, tractate_id, program_name, start_page_num, end_page_num, target_end_date,
+                pages_per_day, pace_mode,
+                COALESCE(start_date, substr(created_at, 1, 10)) AS start_date
+           FROM study_programs WHERE id = ?`,
+      )
+      .get(id) as
+      | {
+          id: number
+          tractate_id: number
+          program_name: string
+          start_page_num: number
+          end_page_num: number
+          target_end_date: string
+          pages_per_day: number
+          pace_mode: PaceMode
+          start_date: string
+        }
+      | undefined
+    if (!row) {
+      return null
+    }
+
+    const restRows = db
+      .prepare(
+        `SELECT rest_type, day_of_week, specific_date FROM program_rest_days
+          WHERE program_id = ? ORDER BY id ASC`,
+      )
+      .all(id) as Array<{ rest_type: string; day_of_week: number | null; specific_date: string | null }>
+
+    return {
+      id: row.id,
+      tractateId: row.tractate_id,
+      programName: row.program_name,
+      startPage: row.start_page_num,
+      endPage: row.end_page_num,
+      startDate: row.start_date,
+      paceMode: row.pace_mode,
+      pagesPerDay: row.pages_per_day,
+      targetEndDate: row.target_end_date,
+      restWeekdays: restRows
+        .filter((rest) => rest.rest_type === 'weekday' && rest.day_of_week !== null)
+        .map((rest) => rest.day_of_week as number),
+      restDates: restRows
+        .filter((rest) => rest.rest_type === 'date' && rest.specific_date !== null)
+        .map((rest) => rest.specific_date as string),
+    }
   }
 
   getPageCount(): number {

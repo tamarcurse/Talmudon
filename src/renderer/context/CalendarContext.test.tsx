@@ -1,19 +1,11 @@
 import { render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mockBridge } from '../../test/mockBridge'
 import { CalendarProvider, useCalendar } from './CalendarContext'
 
 function CalendarTypeProbe() {
   const { calendarType } = useCalendar()
   return <p data-testid="calendar-type">{calendarType}</p>
-}
-
-function mockBridge(persisted: string | null) {
-  const bridge = {
-    getUserSetting: vi.fn().mockResolvedValue(persisted),
-    setUserSetting: vi.fn().mockResolvedValue(undefined),
-  }
-  window.talmudonBridge = bridge as unknown as Window['talmudonBridge']
-  return bridge
 }
 
 afterEach(() => {
@@ -22,7 +14,7 @@ afterEach(() => {
 
 describe('CalendarProvider', () => {
   it('defaults calendarType to gregorian', () => {
-    mockBridge(null)
+    mockBridge()
     render(
       <CalendarProvider>
         <CalendarTypeProbe />
@@ -33,7 +25,7 @@ describe('CalendarProvider', () => {
   })
 
   it('loads the persisted calendar type on mount', async () => {
-    const bridge = mockBridge('hebrew')
+    const bridge = mockBridge({ calendar: 'hebrew' })
     render(
       <CalendarProvider>
         <CalendarTypeProbe />
@@ -45,7 +37,7 @@ describe('CalendarProvider', () => {
   })
 
   it('ignores an unknown persisted value', async () => {
-    const bridge = mockBridge('banana')
+    const bridge = mockBridge({ calendar: 'banana' })
     render(
       <CalendarProvider>
         <CalendarTypeProbe />

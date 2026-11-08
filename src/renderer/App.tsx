@@ -1,4 +1,6 @@
+import { useState } from 'react'
 import Sidebar from './components/Sidebar'
+import StudyProgramWizard from './components/wizard/StudyProgramWizard'
 
 const modules = [
   {
@@ -20,7 +22,22 @@ const modules = [
 
 const hierarchy = ['מסכת', 'דף', 'רש"י', 'תוספות', 'הערות אישיות']
 
+type View = { name: 'dashboard' } | { name: 'wizard'; mode: 'create' } | { name: 'wizard'; mode: 'edit'; programId: number }
+
 function App() {
+  const [view, setView] = useState<View>({ name: 'dashboard' })
+
+  if (view.name === 'wizard') {
+    return (
+      <StudyProgramWizard
+        mode={view.mode}
+        programId={view.mode === 'edit' ? view.programId : undefined}
+        onSaved={() => setView({ name: 'dashboard' })}
+        onCancel={() => setView({ name: 'dashboard' })}
+      />
+    )
+  }
+
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100" dir="rtl" lang="he">
       <div className="flex min-h-screen">
@@ -34,6 +51,7 @@ function App() {
             </div>
             <button
               type="button"
+              onClick={() => setView({ name: 'wizard', mode: 'create' })}
               className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
             >
               יצירת תוכנית חדשה

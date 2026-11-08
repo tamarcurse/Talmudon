@@ -1,7 +1,7 @@
 import { app, BrowserWindow, ipcMain } from 'electron'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { DatabaseService } from './database.js'
+import { DatabaseService, type ProgramInput } from './database.js'
 
 const isDev = !app.isPackaged
 const rendererUrl = 'http://localhost:5173'
@@ -47,6 +47,15 @@ ipcMain.handle('database:get-user-setting', (_event, settingName: string) =>
 ipcMain.handle('database:set-user-setting', (_event, settingName: string, value: unknown) =>
   databaseService.setUserSetting(settingName, value),
 )
+
+ipcMain.handle('database:get-shas-pages', () => databaseService.getShasPages())
+ipcMain.handle('database:create-program', (_event, input: ProgramInput) =>
+  databaseService.createProgram(input),
+)
+ipcMain.handle('database:update-program', (_event, id: number, input: ProgramInput) =>
+  databaseService.updateProgram(id, input),
+)
+ipcMain.handle('database:get-program', (_event, id: number) => databaseService.getProgram(id))
 
 app.whenReady().then(() => {
   databaseService.initialize()

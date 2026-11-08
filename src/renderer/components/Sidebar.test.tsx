@@ -2,16 +2,8 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CalendarProvider } from '../context/CalendarContext'
 import { formatGregorianDate, formatHebrewDate } from '../lib/hebrewDate'
+import { mockBridge } from '../../test/mockBridge'
 import Sidebar from './Sidebar'
-
-function mockBridge(persisted: string | null) {
-  const bridge = {
-    getUserSetting: vi.fn().mockResolvedValue(persisted),
-    setUserSetting: vi.fn().mockResolvedValue(undefined),
-  }
-  window.talmudonBridge = bridge as unknown as Window['talmudonBridge']
-  return bridge
-}
 
 function renderSidebar() {
   return render(
@@ -27,7 +19,7 @@ afterEach(() => {
 
 describe('Sidebar calendar toggle', () => {
   it('renders the לועזי / עברי toggle with Gregorian active by default', async () => {
-    const bridge = mockBridge(null)
+    const bridge = mockBridge()
     renderSidebar()
     await vi.waitFor(() => expect(bridge.getUserSetting).toHaveBeenCalled())
 
@@ -37,7 +29,7 @@ describe('Sidebar calendar toggle', () => {
   })
 
   it('reflects a persisted Hebrew calendar on mount', async () => {
-    mockBridge('hebrew')
+    mockBridge({ calendar: 'hebrew' })
     renderSidebar()
 
     expect(await screen.findByText(formatHebrewDate(new Date()))).toBeInTheDocument()
@@ -45,7 +37,7 @@ describe('Sidebar calendar toggle', () => {
   })
 
   it('flips the sample date and persists the choice when toggled', async () => {
-    const bridge = mockBridge(null)
+    const bridge = mockBridge()
     renderSidebar()
     await vi.waitFor(() => expect(bridge.getUserSetting).toHaveBeenCalled())
 
