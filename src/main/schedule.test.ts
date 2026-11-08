@@ -222,3 +222,41 @@ describe('planSchedule', () => {
     expect(() => planSchedule({ pages: [2], startDate: '2026-01-01', pagesPerDay: 0, rest: NO_REST })).toThrow()
   })
 })
+
+describe('holiday rest days', () => {
+  const chanukah = Array.from({ length: 8 }, (_, i) => `chanukah-${i + 1}`)
+
+  it('skips Chanukah days (5-12 December 2026)', () => {
+    const rest = { weekdays: [], dates: [], holidays: chanukah }
+    expect(isStudyDay('2026-12-04', rest)).toBe(true)
+    expect(isStudyDay('2026-12-05', rest)).toBe(false)
+    expect(isStudyDay('2026-12-12', rest)).toBe(false)
+    expect(isStudyDay('2026-12-13', rest)).toBe(true)
+    expect(computeEndDate({ startDate: '2026-12-03', totalDafim: 3, pagesPerDay: 1, rest })).toBe('2026-12-13')
+    expect(planSchedule({ pages: [2, 3, 4], startDate: '2026-12-03', pagesPerDay: 1, rest }).map((p) => p.date)).toEqual([
+      '2026-12-03',
+      '2026-12-04',
+      '2026-12-13',
+    ])
+  })
+
+  it('only skips selected leaves', () => {
+    const rest = { weekdays: [], dates: [], holidays: ['chanukah-1'] }
+    expect(isStudyDay('2026-12-05', rest)).toBe(false)
+    expect(isStudyDay('2026-12-06', rest)).toBe(true)
+  })
+
+  it('skips the holiday in every year of a multi-year program', () => {
+    const rest = { weekdays: [], dates: [], holidays: ['yom-kippur'] }
+    expect(isStudyDay('2026-09-21', rest)).toBe(false)
+    expect(isStudyDay('2027-10-11', rest)).toBe(false)
+    expect(isStudyDay('2027-10-12', rest)).toBe(true)
+  })
+
+  it('counts holidays in computePagesPerDay', () => {
+    const rest = { weekdays: [], dates: [], holidays: chanukah }
+    expect(
+      computePagesPerDay({ startDate: '2026-12-01', targetEndDate: '2026-12-14', totalDafim: 6, rest }),
+    ).toBe(1)
+  })
+})

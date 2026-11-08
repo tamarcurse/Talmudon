@@ -38,7 +38,7 @@ function RecalculateDialog({ program, remainingPages, fromDate, onSubmit, onCanc
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
-  const rest = { weekdays: program.restWeekdays, dates: program.restDates }
+  const rest = { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays }
   const pagesPerDay = Number(paceInput)
 
   let preview: Preview = null
@@ -83,6 +83,7 @@ function RecalculateDialog({ program, remainingPages, fromDate, onSubmit, onCanc
       targetEndDate: program.targetEndDate,
       restWeekdays: program.restWeekdays,
       restDates: program.restDates,
+      restHolidays: program.restHolidays,
     }
     try {
       await onSubmit({

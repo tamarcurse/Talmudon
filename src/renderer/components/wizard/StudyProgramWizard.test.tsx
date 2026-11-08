@@ -273,6 +273,51 @@ describe('Step 4 and 5: rest days and summary', () => {
     expect(bridge.createProgram.mock.calls[0][0].restDates).toEqual([])
   })
 
+  it('ticking Chanukah moves the end date and reaches createProgram', async () => {
+    const { bridge } = await toRestStep()
+    next()
+    const before = screen.getByTestId('program-summary').textContent
+    previous()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: 'חנוכה' }))
+    next()
+
+    expect(screen.getByTestId('program-summary').textContent).not.toBe(before)
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('חגים')
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('חנוכה')
+    fireEvent.click(screen.getByRole('button', { name: 'צור תוכנית' }))
+
+    await waitFor(() => expect(bridge.createProgram).toHaveBeenCalledTimes(1))
+    expect([...bridge.createProgram.mock.calls[0][0].restHolidays].sort()).toEqual(
+      Array.from({ length: 8 }, (_, i) => `chanukah-${i + 1}`).sort(),
+    )
+  })
+
+  it('expands Pesach to show a single Chol HaMoed item and a partial group state', async () => {
+    await toRestStep()
+    fireEvent.click(screen.getByRole('button', { name: 'פתח פסח' }))
+
+    expect(screen.getAllByRole('checkbox', { name: /פסח –/ })).toHaveLength(3)
+    expect(screen.getByRole('checkbox', { name: 'פסח – חול המועד' })).toBeInTheDocument()
+
+    const group = screen.getByRole('checkbox', { name: 'פסח' }) as HTMLInputElement
+    fireEvent.click(group)
+    expect(group.checked).toBe(true)
+    fireEvent.click(screen.getByRole('checkbox', { name: 'פסח – חול המועד' }))
+    expect(group.checked).toBe(false)
+    expect(group.indeterminate).toBe(true)
+
+    next()
+    expect(screen.getByTestId('program-summary')).toHaveTextContent('פסח (יום טוב ראשון, שביעי של פסח)')
+  })
+
+  it('summary says אין when no holidays are chosen', async () => {
+    await toRestStep()
+    next()
+    const dt = screen.getByText('חגים')
+    expect(dt.nextElementSibling).toHaveTextContent('אין')
+  })
+
   it('blocks Next when every weekday is a rest day', async () => {
     await toRestStep()
 
@@ -309,6 +354,7 @@ describe('Step 4 and 5: rest days and summary', () => {
       targetEndDate: '2027-01-19',
       restWeekdays: [6],
       restDates: [],
+      restHolidays: [],
     })
   })
 
@@ -337,6 +383,7 @@ describe('edit mode', () => {
     targetEndDate: '2026-12-20',
     restWeekdays: [5, 6],
     restDates: ['2026-12-01'],
+    restHolidays: [],
   }
 
   it('loads every field from getProgram and updates instead of creating', async () => {
@@ -383,9 +430,23 @@ describe('edit mode', () => {
       paceMode: 'target_date',
       targetEndDate: '2026-12-20',
       restDates: ['2026-12-01'],
+      restHolidays: [],
     })
     expect([...input.restWeekdays].sort()).toEqual([5, 6])
     expect(onSaved).toHaveBeenCalledWith(7)
+  })
+
+  it('loads saved holidays', async () => {
+    await renderWizard({
+      mode: 'edit',
+      programId: 7,
+      program: { ...program, restHolidays: ['purim', 'shushan-purim'] },
+    })
+    next()
+    next()
+    next()
+
+    expect(screen.getByRole('checkbox', { name: 'פורים' })).toBeChecked()
   })
 
   it('restores daily pace mode and the saved pace', async () => {

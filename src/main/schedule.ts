@@ -1,7 +1,9 @@
 // Pure schedule math. All dates are ISO `YYYY-MM-DD` strings; calculations use UTC
 // so the local time zone can never shift a date.
 
-export type RestRules = { weekdays: number[]; dates: string[] }
+import { holidayLeavesOnDate } from './holidays.js'
+
+export type RestRules = { weekdays: number[]; dates: string[]; holidays?: string[] }
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/
@@ -28,7 +30,17 @@ function allWeekdaysAreRest(rest: RestRules): boolean {
 }
 
 function isStudyTime(time: number, rest: RestRules): boolean {
-  return !rest.weekdays.includes(new Date(time).getUTCDay()) && !rest.dates.includes(toIso(time))
+  if (rest.weekdays.includes(new Date(time).getUTCDay())) {
+    return false
+  }
+  const iso = toIso(time)
+  if (rest.dates.includes(iso)) {
+    return false
+  }
+  if (rest.holidays && rest.holidays.length > 0) {
+    return !holidayLeavesOnDate(iso).some((leaf) => rest.holidays?.includes(leaf))
+  }
+  return true
 }
 
 export function isStudyDay(date: string, rest: RestRules): boolean {

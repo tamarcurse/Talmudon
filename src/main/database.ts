@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import Database from 'better-sqlite3'
+import { isHolidayId } from './holidays.js'
 import { computeProgramMetrics, type ProgramMetrics } from './metrics.js'
 import { UNIT_KEYS, isPageComplete, isUnitKey, type UnitFlags, type UnitTarget } from './progress.js'
 import { computeEndDate, computePagesPerDay, planSchedule } from './schedule.js'
@@ -44,6 +45,7 @@ export type ProgramInput = {
   targetEndDate: string
   restWeekdays: number[]
   restDates: string[]
+  restHolidays: string[]
 }
 
 export type ProgramRecord = ProgramInput & { id: number }
@@ -90,6 +92,10 @@ const USER_SETTING_VALIDATORS: Record<string, (value: unknown) => boolean> = {
 
 const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = [
   { column: 'calendar_type', definition: "calendar_type TEXT NOT NULL DEFAULT 'gregorian'" },
+]
+
+const PROGRAM_REST_DAYS_MIGRATIONS: Array<{ column: string; definition: string }> = [
+  { column: 'holiday_id', definition: 'holiday_id TEXT' },
 ]
 
 const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> = [
@@ -227,7 +233,7 @@ export class DatabaseService {
   }
 
   private applyColumnMigrations(
-    table: 'user_settings' | 'study_programs',
+    table: 'user_settings' | 'study_programs' | 'program_rest_days',
     migrations: Array<{ column: string; definition: string }>,
   ): void {
     const db = this.ensureDatabase()
@@ -264,6 +270,7 @@ export class DatabaseService {
 
   private migrateStudyPrograms(): void {
     this.applyColumnMigrations('study_programs', STUDY_PROGRAMS_MIGRATIONS)
+    this.applyColumnMigrations('program_rest_days', PROGRAM_REST_DAYS_MIGRATIONS)
   }
 
   private seedTractates(): void {
@@ -368,6 +375,11 @@ export class DatabaseService {
         throw new Error(`Invalid rest date: ${String(date)}`)
       }
     }
+    for (const holiday of input.restHolidays ?? []) {
+      if (!isHolidayId(holiday)) {
+        throw new Error(`Invalid rest holiday: ${String(holiday)}`)
+      }
+    }
   }
 
   private replaceRestDays(programId: number, input: ProgramInput): void {
@@ -385,6 +397,12 @@ export class DatabaseService {
     }
     for (const date of new Set(input.restDates)) {
       insertDate.run(programId, date)
+    }
+    const insertHoliday = db.prepare(
+      "INSERT INTO program_rest_days (program_id, rest_type, holiday_id) VALUES (?, 'holiday', ?)",
+    )
+    for (const holiday of new Set(input.restHolidays ?? [])) {
+      insertHoliday.run(programId, holiday)
     }
   }
 
@@ -463,7 +481,7 @@ export class DatabaseService {
       pages: pageRange(input.startPage, input.endPage),
       startDate: input.startDate,
       pagesPerDay: input.pagesPerDay,
-      rest: { weekdays: input.restWeekdays, dates: input.restDates },
+      rest: { weekdays: input.restWeekdays, dates: input.restDates, holidays: input.restHolidays },
     })
     const insert = db.prepare(
       'INSERT INTO page_progress (program_id, page_number, scheduled_date) VALUES (?, ?, ?)',
@@ -511,7 +529,7 @@ export class DatabaseService {
     }
 
     const startDate = today > program.startDate ? today : program.startDate
-    const rest = { weekdays: program.restWeekdays, dates: program.restDates }
+    const rest = { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays }
     let pagesPerDay = program.pagesPerDay
     let targetEndDate = program.targetEndDate
     const deadlinePassed = program.paceMode === 'target_date' && program.targetEndDate < startDate
@@ -636,10 +654,15 @@ export class DatabaseService {
 
     const restRows = db
       .prepare(
-        `SELECT rest_type, day_of_week, specific_date FROM program_rest_days
+        `SELECT rest_type, day_of_week, specific_date, holiday_id FROM program_rest_days
           WHERE program_id = ? ORDER BY id ASC`,
       )
-      .all(id) as Array<{ rest_type: string; day_of_week: number | null; specific_date: string | null }>
+      .all(id) as Array<{
+      rest_type: string
+      day_of_week: number | null
+      specific_date: string | null
+      holiday_id: string | null
+    }>
 
     return {
       id: row.id,
@@ -657,6 +680,9 @@ export class DatabaseService {
       restDates: restRows
         .filter((rest) => rest.rest_type === 'date' && rest.specific_date !== null)
         .map((rest) => rest.specific_date as string),
+      restHolidays: restRows
+        .filter((rest) => rest.rest_type === 'holiday' && rest.holiday_id !== null)
+        .map((rest) => rest.holiday_id as string),
     }
   }
 
@@ -675,7 +701,7 @@ export class DatabaseService {
         pausedAt: row.paused_at,
         startDate: program.startDate,
         pagesPerDay: program.pagesPerDay,
-        rest: { weekdays: program.restWeekdays, dates: program.restDates },
+        rest: { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays },
       })
       return { id: row.id, programName: row.program_name, status: row.status, ...metrics }
     })

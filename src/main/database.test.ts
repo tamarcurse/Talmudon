@@ -211,6 +211,7 @@ describe('programs API', () => {
     targetEndDate: '2027-01-10',
     restWeekdays: [],
     restDates: [],
+    restHolidays: [],
   }
 
   it('getShasPages returns all 200 pages with Hebrew labels', () => {
@@ -238,6 +239,7 @@ describe('programs API', () => {
       ...baseInput,
       restWeekdays: [5, 6],
       restDates: ['2026-12-25', '2027-01-01'],
+      restHolidays: [],
     })
 
     const loaded = service.getProgram(id)
@@ -260,6 +262,7 @@ describe('programs API', () => {
       targetEndDate: '2026-12-01',
       restWeekdays: [0],
       restDates: [],
+      restHolidays: [],
     }
     service.updateProgram(id, updated, baseInput.startDate)
 
@@ -342,6 +345,50 @@ describe('programs API', () => {
     const id = service.createProgram(baseInput)
     expect(service.getProgram(id)).toEqual({ id, ...baseInput })
   })
+
+  it('round-trips rest holidays and replaces them on update', () => {
+    const service = makeService('programs-holidays')
+    const id = service.createProgram({ ...baseInput, restHolidays: ['chanukah-1', 'pesach-chol-hamoed', 'chanukah-1'] })
+    expect([...service.getProgram(id)!.restHolidays].sort()).toEqual(['chanukah-1', 'pesach-chol-hamoed'])
+
+    service.updateProgram(id, { ...baseInput, restHolidays: ['purim'] }, baseInput.startDate)
+    expect(service.getProgram(id)!.restHolidays).toEqual(['purim'])
+  })
+
+  it('rejects unknown holiday ids', () => {
+    const service = makeService('programs-holidays-invalid')
+    expect(() => service.createProgram({ ...baseInput, restHolidays: ['not-a-holiday'] })).toThrow(/holiday/)
+  })
+
+  it('schedules around selected holidays', () => {
+    const service = makeService('programs-holidays-schedule')
+    const chanukah = Array.from({ length: 8 }, (_, i) => `chanukah-${i + 1}`)
+    const id = service.createProgram({
+      ...baseInput,
+      startDate: '2026-12-03',
+      pagesPerDay: 1,
+      targetEndDate: '2027-02-01',
+      restHolidays: chanukah,
+    })
+    const dates = service.getPageProgress(id).map((page) => page.scheduledDate)
+    expect(dates.slice(0, 3)).toEqual(['2026-12-03', '2026-12-04', '2026-12-13'])
+  })
+
+  it('adds holiday_id to an existing program_rest_days table', () => {
+    const dbPath = createTestPath('rest-days-migration')
+    const first = new DatabaseService(dbPath)
+    first.initialize()
+    first.close()
+    const raw = new Database(dbPath)
+    raw.exec('ALTER TABLE program_rest_days DROP COLUMN holiday_id')
+    raw.close()
+
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+    service.initialize()
+    const id = service.createProgram({ ...baseInput, restHolidays: ['yom-kippur'] })
+    expect(service.getProgram(id)!.restHolidays).toEqual(['yom-kippur'])
+  })
 })
 
 describe('page_progress schedule', () => {
@@ -356,6 +403,7 @@ describe('page_progress schedule', () => {
     targetEndDate: '2026-01-04',
     restWeekdays: [],
     restDates: [],
+    restHolidays: [],
   }
 
   function setup() {
@@ -591,6 +639,7 @@ describe('program summaries and pause/resume', () => {
     targetEndDate: '2026-01-04',
     restWeekdays: [],
     restDates: [],
+    restHolidays: [],
   }
 
   it('opens an older database without paused_at and reports programs as active', () => {
