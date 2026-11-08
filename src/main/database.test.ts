@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import Database from 'better-sqlite3'
 import { afterEach, describe, expect, it } from 'vitest'
 import { DatabaseService } from './database.js'
 
@@ -88,5 +89,75 @@ describe('DatabaseService', () => {
     service.initialize()
 
     expect(() => service.getUserSetting('(SELECT sql FROM sqlite_master)')).toThrow()
+  })
+
+  describe('calendar_type setting', () => {
+    it('defaults to gregorian on a fresh database', () => {
+      const service = new DatabaseService(createTestPath('calendar-default'))
+      testServices.push(service)
+
+      service.initialize()
+
+      expect(service.getUserSetting('calendar_type')).toBe('gregorian')
+    })
+
+    it('persists a new value across a restart', () => {
+      const dbPath = createTestPath('calendar-persist')
+      const service = new DatabaseService(dbPath)
+      testServices.push(service)
+
+      service.initialize()
+      service.setUserSetting('calendar_type', 'hebrew')
+      expect(service.getUserSetting('calendar_type')).toBe('hebrew')
+      service.close()
+
+      const reopened = new DatabaseService(dbPath)
+      testServices.push(reopened)
+      reopened.initialize()
+
+      expect(reopened.getUserSetting('calendar_type')).toBe('hebrew')
+    })
+
+    it('rejects invalid calendar values', () => {
+      const service = new DatabaseService(createTestPath('calendar-invalid'))
+      testServices.push(service)
+
+      service.initialize()
+
+      expect(() => service.setUserSetting('calendar_type', 'banana')).toThrow()
+      expect(service.getUserSetting('calendar_type')).toBe('gregorian')
+    })
+
+    it('rejects setting names that are not on the allow-list', () => {
+      const service = new DatabaseService(createTestPath('calendar-set-whitelist'))
+      testServices.push(service)
+
+      service.initialize()
+
+      expect(() => service.setUserSetting('sqlite_master', 'x')).toThrow()
+      expect(() => service.setUserSetting('(SELECT sql FROM sqlite_master)', 'x')).toThrow()
+    })
+
+    it('migrates a database created with the old user_settings schema', () => {
+      const dbPath = createTestPath('calendar-migration')
+      const legacy = new Database(dbPath)
+      legacy.exec(`
+        CREATE TABLE user_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          show_hebrew_dates BOOLEAN NOT NULL DEFAULT 0
+        );
+        INSERT INTO user_settings (id, show_hebrew_dates) VALUES (1, 1);
+      `)
+      legacy.close()
+
+      const service = new DatabaseService(dbPath)
+      testServices.push(service)
+      service.initialize()
+      service.initialize()
+
+      expect(service.getUserSetting('calendar_type')).toBe('gregorian')
+      expect(service.getUserSetting('show_hebrew_dates')).toBe(true)
+      expect(service.getRowCount('user_settings')).toBe(1)
+    })
   })
 })

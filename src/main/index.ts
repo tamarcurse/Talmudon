@@ -44,6 +44,9 @@ ipcMain.handle('database:get-tractates', () => databaseService.getTractates())
 ipcMain.handle('database:get-user-setting', (_event, settingName: string) =>
   databaseService.getUserSetting(settingName),
 )
+ipcMain.handle('database:set-user-setting', (_event, settingName: string, value: unknown) =>
+  databaseService.setUserSetting(settingName, value),
+)
 
 app.whenReady().then(() => {
   databaseService.initialize()

@@ -38,8 +38,19 @@ const ALLOWED_TABLE_NAMES = new Set([
   'user_settings',
 ])
 
-const ALLOWED_USER_SETTING_NAMES = new Set(['show_hebrew_dates'])
+const ALLOWED_USER_SETTING_NAMES = new Set(['show_hebrew_dates', 'calendar_type'])
 
+export const CALENDAR_TYPES = ['gregorian', 'hebrew'] as const
+export type CalendarType = (typeof CALENDAR_TYPES)[number]
+
+const USER_SETTING_VALIDATORS: Record<string, (value: unknown) => boolean> = {
+  show_hebrew_dates: (value) => typeof value === 'boolean',
+  calendar_type: (value) => (CALENDAR_TYPES as readonly unknown[]).includes(value),
+}
+
+const USER_SETTINGS_MIGRATIONS: Array<{ column: string; definition: string }> = [
+  { column: 'calendar_type', definition: "calendar_type TEXT NOT NULL DEFAULT 'gregorian'" },
+]
 
 
 const SCHEMA_SQL = `
@@ -97,7 +108,8 @@ CREATE TABLE IF NOT EXISTS page_progress (
 
 CREATE TABLE IF NOT EXISTS user_settings (
     id INTEGER PRIMARY KEY CHECK (id = 1),
-    show_hebrew_dates BOOLEAN NOT NULL DEFAULT 0
+    show_hebrew_dates BOOLEAN NOT NULL DEFAULT 0,
+    calendar_type TEXT NOT NULL DEFAULT 'gregorian'
 );
 
 INSERT OR IGNORE INTO user_settings (id, show_hebrew_dates) VALUES (1, 0);
@@ -127,6 +139,7 @@ export class DatabaseService {
   initialize(): DatabaseService {
     const db = this.ensureDatabase()
     db.exec(SCHEMA_SQL)
+    this.migrateUserSettings()
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -135,6 +148,18 @@ export class DatabaseService {
   close(): void {
     this.db?.close()
     this.db = null
+  }
+
+  private migrateUserSettings(): void {
+    const db = this.ensureDatabase()
+    const columns = db.prepare('PRAGMA table_info(user_settings)').all() as Array<{ name: string }>
+    const existing = new Set(columns.map((column) => column.name))
+
+    for (const migration of USER_SETTINGS_MIGRATIONS) {
+      if (!existing.has(migration.column)) {
+        db.exec(`ALTER TABLE user_settings ADD COLUMN ${migration.definition}`)
+      }
+    }
   }
 
   private seedTractates(): void {
@@ -235,6 +260,20 @@ export class DatabaseService {
     }
 
     return value as T
+  }
+
+  setUserSetting(settingName: string, value: unknown): void {
+    if (!ALLOWED_USER_SETTING_NAMES.has(settingName)) {
+      throw new Error(`Unknown setting name: ${settingName}`)
+    }
+
+    if (!USER_SETTING_VALIDATORS[settingName](value)) {
+      throw new Error(`Invalid value for setting ${settingName}: ${String(value)}`)
+    }
+
+    const storedValue = typeof value === 'boolean' ? Number(value) : value
+    const db = this.ensureDatabase()
+    db.prepare(`UPDATE user_settings SET ${settingName} = ? WHERE id = 1`).run(storedValue)
   }
 }
 

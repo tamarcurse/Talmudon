@@ -1,3 +1,5 @@
+import Sidebar from './components/Sidebar'
+
 const modules = [
   {
     title: 'לוח תוכניות',
@@ -22,39 +24,7 @@ function App() {
   return (
     <main className="min-h-screen bg-slate-950 text-slate-100" dir="rtl" lang="he">
       <div className="flex min-h-screen">
-        <aside className="w-72 border-l border-slate-800 bg-slate-900/80 p-6 backdrop-blur-sm">
-          <div className="mb-8 flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/15 text-lg font-bold text-cyan-300">
-              ת
-            </div>
-            <div>
-              <p className="text-xs text-slate-400">Desktop Workspace</p>
-              <h1 className="text-xl font-bold text-white">Talmudon</h1>
-            </div>
-          </div>
-
-          <nav className="space-y-2 text-sm text-slate-300">
-            {['לוח ראשי', 'תוכניות', 'רשימות', 'מחקרים', 'הגדרות'].map((item, index) => (
-              <button
-                key={item}
-                className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-right transition ${
-                  index === 0
-                    ? 'bg-slate-800 text-white shadow-inner shadow-slate-700/30'
-                    : 'hover:bg-slate-800/80'
-                }`}
-                type="button"
-              >
-                <span>{item}</span>
-                <span className="text-xs text-slate-500">0{index + 1}</span>
-              </button>
-            ))}
-          </nav>
-
-          <div className="mt-8 rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-sm text-emerald-200">
-            <p className="font-semibold">מצב אופליין</p>
-            <p className="mt-1 text-emerald-100/80">כל הנתונים נשמרים מקומית, ללא תלות ברשת.</p>
-          </div>
-        </aside>
+        <Sidebar />
 
         <div className="flex-1 p-6 lg:p-8">
           <header className="mb-8 flex flex-col gap-4 rounded-3xl border border-slate-800 bg-slate-900/70 p-6 shadow-2xl shadow-slate-950/40 md:flex-row md:items-center md:justify-between">
