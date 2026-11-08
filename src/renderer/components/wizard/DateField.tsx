@@ -11,8 +11,7 @@ import {
 const YEARS_BEFORE = 1
 const YEARS_AFTER = 20
 
-const selectClass =
-  'rounded-lg border border-slate-700 bg-slate-950 px-2 py-1.5 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none'
+const selectClass = 'field'
 
 type DateFieldProps = {
   /** Accessible name of the whole field (the native input's aria-label, prefix of the Hebrew selects'). */

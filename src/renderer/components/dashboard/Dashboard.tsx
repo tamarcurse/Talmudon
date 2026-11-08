@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ProgramSummary } from '../../../main/database'
-import CalendarToggle from './CalendarToggle'
+import AppHeader from '../layout/AppHeader'
 import ProgramCard from './ProgramCard'
 
 type Props = {
@@ -30,24 +30,26 @@ function Dashboard({ onCreate, onEdit, onOpen }: Props) {
   }
 
   return (
-    <main className="min-h-screen bg-slate-950 p-6 text-slate-100 lg:p-8" dir="rtl" lang="he">
+    <AppHeader>
       <header className="mb-8 flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <h1 className="text-3xl font-bold text-white">תוכניות הלימוד שלי</h1>
-        <div className="flex items-center gap-3">
-          <CalendarToggle />
-          <button
-            type="button"
-            onClick={onCreate}
-            className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-4 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20"
-          >
-            צור תוכנית חדשה
-          </button>
+        <div>
+          <h1 className="text-3xl font-bold text-ink">תוכניות הלימוד שלי</h1>
+          {summaries !== null && summaries.length > 0 && (
+            <p className="mt-1 text-sm text-muted">{summaries.length} תוכניות</p>
+          )}
         </div>
+        <button type="button" onClick={onCreate} className="btn-primary">
+          צור תוכנית חדשה
+        </button>
       </header>
 
-      {summaries !== null && summaries.length === 0 && <p className="text-slate-400">אין עדיין תוכניות</p>}
+      {summaries !== null && summaries.length === 0 && (
+        <div className="card flex flex-col items-center gap-4 p-12 text-center">
+          <p className="text-muted">אין עדיין תוכניות</p>
+        </div>
+      )}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-5 md:grid-cols-2 xl:grid-cols-3">
         {(summaries ?? []).map((summary) => (
           <ProgramCard
             key={summary.id}
@@ -58,7 +60,7 @@ function Dashboard({ onCreate, onEdit, onOpen }: Props) {
           />
         ))}
       </section>
-    </main>
+    </AppHeader>
   )
 }
 

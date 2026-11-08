@@ -21,54 +21,41 @@ function ProgramCard({ summary, onOpen, onEdit, onToggleStatus }: Props) {
   const { calendarType } = useCalendar()
   const paused = summary.status === 'paused'
   const net = summary.lead - summary.lag
+  const paceBadge = net < 0 ? 'badge-danger' : net > 0 ? 'badge-success' : 'badge-neutral'
 
   return (
     <article
       data-paused={paused}
-      className={`rounded-3xl border border-slate-800 bg-slate-900/70 p-5 transition ${paused ? 'opacity-60' : ''}`}
+      className={`card p-5 transition hover:-translate-y-0.5 hover:shadow-md ${paused ? 'opacity-70' : ''}`}
     >
       <div className="flex items-start justify-between gap-3">
-        <h3 className="text-lg font-bold text-white">{summary.programName}</h3>
-        {paused && (
-          <span className="rounded-full border border-amber-400/30 bg-amber-500/10 px-2 py-1 text-xs text-amber-200">
-            תוכנית מושהית
-          </span>
-        )}
+        <h3 className="text-lg font-bold text-ink">{summary.programName}</h3>
+        {paused && <span className="badge-warn">תוכנית מושהית</span>}
       </div>
 
       <div className="mt-4 flex items-center gap-5">
         <ProgressPie percent={summary.percentComplete} />
         <div className="space-y-2 text-sm">
-          <p className={net < 0 ? 'text-rose-300' : 'text-emerald-300'}>{paceLabel(summary.lag, summary.lead)}</p>
+          <p>
+            <span className={paceBadge}>{paceLabel(summary.lag, summary.lead)}</span>
+          </p>
           {summary.estimatedEndDate && (
-            <p className="text-slate-300">
+            <p className="text-muted">
               סיום משוער:{' '}
-              <span className="font-semibold text-white">{formatIsoDate(summary.estimatedEndDate, calendarType)}</span>
+              <span className="font-semibold text-ink">{formatIsoDate(summary.estimatedEndDate, calendarType)}</span>
             </p>
           )}
         </div>
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2 text-sm">
-        <button
-          type="button"
-          onClick={() => onOpen(summary.id)}
-          className="rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-3 py-1.5 font-semibold text-cyan-200 hover:bg-cyan-500/20"
-        >
+      <div className="mt-5 flex flex-wrap gap-2 border-t border-line pt-4">
+        <button type="button" onClick={() => onOpen(summary.id)} className="btn-primary">
           כניסה לתוכנית
         </button>
-        <button
-          type="button"
-          onClick={() => onEdit(summary.id)}
-          className="rounded-xl border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-slate-800"
-        >
+        <button type="button" onClick={() => onEdit(summary.id)} className="btn-secondary">
           עריכה
         </button>
-        <button
-          type="button"
-          onClick={() => onToggleStatus(summary)}
-          className="rounded-xl border border-slate-700 px-3 py-1.5 text-slate-200 hover:bg-slate-800"
-        >
+        <button type="button" onClick={() => onToggleStatus(summary)} className="btn-secondary">
           {paused ? 'הפעל מחדש' : 'השהה'}
         </button>
       </div>

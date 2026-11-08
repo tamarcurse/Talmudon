@@ -13,12 +13,7 @@ const FIRST_DAF = 2
 const STEP_TITLES = ['מסכת', 'טווח', 'קצב', 'ימי מנוחה', 'סיכום']
 const WEEKDAY_NAMES = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 'שישי', 'שבת']
 
-const inputClass =
-  'rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 focus:border-cyan-500 focus:outline-none'
-const primaryButton =
-  'rounded-xl border border-cyan-500/40 bg-cyan-500/10 px-5 py-2 text-sm font-semibold text-cyan-200 transition hover:bg-cyan-500/20 disabled:cursor-not-allowed disabled:opacity-40'
-const secondaryButton =
-  'rounded-xl border border-slate-700 px-5 py-2 text-sm font-semibold text-slate-300 transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-40'
+const inputClass = 'field'
 
 export type StudyProgramWizardProps = {
   mode: 'create' | 'edit'
@@ -246,7 +241,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
       case 0:
         return (
           <div className="space-y-5">
-            <label className="block space-y-2 text-sm text-slate-300">
+            <label className="block space-y-2 text-sm text-muted">
               <span>חיפוש מסכת</span>
               <input
                 className={`${inputClass} w-full`}
@@ -262,17 +257,13 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                   type="button"
                   aria-pressed={item.id === tractateId}
                   onClick={() => chooseTractate(item)}
-                  className={`rounded-xl border px-3 py-2 text-sm transition ${
-                    item.id === tractateId
-                      ? 'border-cyan-500/60 bg-cyan-500/15 text-cyan-100'
-                      : 'border-slate-800 bg-slate-950/60 text-slate-200 hover:bg-slate-800/80'
-                  }`}
+                  className={item.id === tractateId ? 'chip-active' : 'chip'}
                 >
                   {item.name_he}
                 </button>
               ))}
             </div>
-            <label className="block space-y-2 text-sm text-slate-300">
+            <label className="block space-y-2 text-sm text-muted">
               <span>שם התוכנית</span>
               <input
                 className={`${inputClass} w-full`}
@@ -289,14 +280,14 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
         return (
           <div className="space-y-5">
             <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm text-slate-300">טווח לימוד</legend>
+              <legend className="mb-2 text-sm text-muted">טווח לימוד</legend>
               {(
                 [
                   ['full', 'מסכת שלמה'],
                   ['custom', 'טווח מותאם'],
                 ] as const
               ).map(([value, label]) => (
-                <label key={value} className="flex items-center gap-2 text-sm text-slate-200">
+                <label key={value} className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink has-[:checked]:border-brand has-[:checked]:bg-brand-soft">
                   <input
                     type="radio"
                     name="range-mode"
@@ -309,7 +300,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             </fieldset>
             {rangeMode === 'custom' && (
               <div className="flex flex-wrap gap-4">
-                <label className="space-y-1 text-sm text-slate-300">
+                <label className="space-y-1 text-sm text-muted">
                   <span className="block">מדף</span>
                   <select
                     className={inputClass}
@@ -323,7 +314,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                     ))}
                   </select>
                 </label>
-                <label className="space-y-1 text-sm text-slate-300">
+                <label className="space-y-1 text-sm text-muted">
                   <span className="block">עד דף</span>
                   <select
                     className={inputClass}
@@ -340,7 +331,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
               </div>
             )}
             {rangeValid && (
-              <p data-testid="range-summary" className="text-sm text-cyan-200">
+              <p data-testid="range-summary" className="text-sm text-brand">
                 {labelOf(startPage)} – {labelOf(endPage)} · {formatDafCount(totalDafim)}
               </p>
             )}
@@ -349,19 +340,19 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
       case 2:
         return (
           <div className="space-y-5">
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="space-y-2 text-sm text-muted">
               <span className="block">תאריך התחלה</span>
               <DateField label="תאריך התחלה" value={startDate} anchor={todayIso} onChange={setStartDate} />
             </div>
             <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm text-slate-300">איך לקבוע את הקצב?</legend>
+              <legend className="mb-2 text-sm text-muted">איך לקבוע את הקצב?</legend>
               {(
                 [
                   ['daily_pace', 'לפי קצב יומי'],
                   ['target_date', 'לפי תאריך יעד'],
                 ] as const
               ).map(([value, label]) => (
-                <label key={value} className="flex items-center gap-2 text-sm text-slate-200">
+                <label key={value} className="flex items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-sm text-ink has-[:checked]:border-brand has-[:checked]:bg-brand-soft">
                   <input
                     type="radio"
                     name="pace-mode"
@@ -373,7 +364,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
               ))}
             </fieldset>
             {paceMode === 'daily_pace' ? (
-              <label className="block space-y-1 text-sm text-slate-300">
+              <label className="block space-y-1 text-sm text-muted">
                 <span>דפים ביום</span>
                 <input
                   type="number"
@@ -385,16 +376,16 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 />
               </label>
             ) : (
-              <div className="space-y-2 text-sm text-slate-300">
+              <div className="space-y-2 text-sm text-muted">
                 <span className="block">תאריך יעד</span>
                 <DateField label="תאריך יעד" value={targetDate || startDate} anchor={todayIso} onChange={setTargetDate} />
-                <p data-testid="target-date-display" className="text-cyan-200">
+                <p data-testid="target-date-display" className="text-brand">
                   {formatIsoDate(targetDate || startDate, calendarType)}
                 </p>
               </div>
             )}
             {!('error' in plan) && (
-              <div className="rounded-xl border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-200">
+              <div className="rounded-xl border border-brand/20 bg-brand-soft p-3 text-sm text-ink">
                 <p>קצב: {formatPace(plan.pagesPerDay)}</p>
                 <p data-testid="end-date-summary">
                   תאריך סיום: {formatIsoDate(plan.targetEndDate, calendarType)}
@@ -407,10 +398,10 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
         return (
           <div className="space-y-5">
             <fieldset className="space-y-2">
-              <legend className="mb-2 text-sm text-slate-300">ימי מנוחה קבועים</legend>
+              <legend className="mb-2 text-sm text-muted">ימי מנוחה קבועים</legend>
               <div className="flex flex-wrap gap-4">
                 {WEEKDAY_NAMES.map((name, day) => (
-                  <label key={name} className="flex items-center gap-2 text-sm text-slate-200">
+                  <label key={name} className="flex items-center gap-2 text-sm text-ink">
                     <input
                       type="checkbox"
                       checked={restWeekdays.includes(day)}
@@ -421,11 +412,11 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 ))}
               </div>
             </fieldset>
-            <div className="space-y-2 text-sm text-slate-300">
+            <div className="space-y-2 text-sm text-muted">
               <span className="block">תאריכי מנוחה מיוחדים (חגים, אירועים)</span>
               <div className="flex flex-wrap items-center gap-3">
                 <DateField label="תאריך מנוחה" value={pendingRestDate} anchor={todayIso} onChange={setPendingRestDate} />
-                <button type="button" className={secondaryButton} onClick={addRestDate}>
+                <button type="button" className="btn-secondary" onClick={addRestDate}>
                   הוסף תאריך
                 </button>
               </div>
@@ -433,12 +424,12 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
                 {restDates.map((date) => {
                   const text = formatIsoDate(date, calendarType)
                   return (
-                    <li key={date} className="flex items-center gap-3 text-slate-200">
+                    <li key={date} className="flex items-center gap-3 text-ink">
                       <span>{text}</span>
                       <button
                         type="button"
                         aria-label={`הסר ${text}`}
-                        className="text-xs text-rose-300 hover:underline"
+                        className="text-xs text-danger hover:underline"
                         onClick={() => setRestDates((current) => current.filter((item) => item !== date))}
                       >
                         הסר
@@ -453,26 +444,26 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
       default:
         return (
           <dl data-testid="program-summary" className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-sm">
-            <dt className="text-slate-400">שם התוכנית</dt>
-            <dd className="text-slate-100">{programName}</dd>
-            <dt className="text-slate-400">מסכת</dt>
-            <dd className="text-slate-100">{tractate?.name_he}</dd>
-            <dt className="text-slate-400">טווח</dt>
-            <dd className="text-slate-100">
+            <dt className="text-muted">שם התוכנית</dt>
+            <dd className="text-ink">{programName}</dd>
+            <dt className="text-muted">מסכת</dt>
+            <dd className="text-ink">{tractate?.name_he}</dd>
+            <dt className="text-muted">טווח</dt>
+            <dd className="text-ink">
               {labelOf(startPage)} – {labelOf(endPage)} · {formatDafCount(totalDafim)}
             </dd>
-            <dt className="text-slate-400">תאריך התחלה</dt>
-            <dd className="text-slate-100">{formatIsoDate(startDate, calendarType)}</dd>
+            <dt className="text-muted">תאריך התחלה</dt>
+            <dd className="text-ink">{formatIsoDate(startDate, calendarType)}</dd>
             {!('error' in plan) && (
               <>
-                <dt className="text-slate-400">קצב</dt>
-                <dd className="text-slate-100">{formatPace(plan.pagesPerDay)}</dd>
-                <dt className="text-slate-400">תאריך סיום</dt>
-                <dd className="text-slate-100">{formatIsoDate(plan.targetEndDate, calendarType)}</dd>
+                <dt className="text-muted">קצב</dt>
+                <dd className="text-ink">{formatPace(plan.pagesPerDay)}</dd>
+                <dt className="text-muted">תאריך סיום</dt>
+                <dd className="text-ink">{formatIsoDate(plan.targetEndDate, calendarType)}</dd>
               </>
             )}
-            <dt className="text-slate-400">ימי מנוחה</dt>
-            <dd className="text-slate-100">
+            <dt className="text-muted">ימי מנוחה</dt>
+            <dd className="text-ink">
               {restWeekdays.length === 0 && restDates.length === 0
                 ? 'אין'
                 : [
@@ -486,62 +477,70 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
   }
 
   return (
-    <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950 text-slate-100" dir="rtl" lang="he">
+    <div className="fixed inset-0 z-50 overflow-y-auto bg-canvas text-ink" dir="rtl" lang="he">
       <div className="mx-auto flex min-h-full max-w-3xl flex-col gap-6 p-6 lg:p-10">
         <header className="space-y-4">
-          <h2 className="text-2xl font-bold text-white">
+          <h2 className="text-2xl font-bold text-ink">
             {mode === 'edit' ? 'עריכת תוכנית לימוד' : 'יצירת תוכנית לימוד חדשה'}
           </h2>
-          <ol className="flex flex-wrap gap-2 text-xs">
+          <ol className="flex flex-wrap items-center gap-3 text-sm">
             {STEP_TITLES.map((title, index) => (
               <li
                 key={title}
                 aria-current={index === step ? 'step' : undefined}
-                className={`rounded-full border px-3 py-1 ${
-                  index === step
-                    ? 'border-cyan-500/50 bg-cyan-500/10 text-cyan-200'
-                    : 'border-slate-800 text-slate-400'
-                }`}
+                className={`flex items-center gap-2 ${index === step ? 'font-semibold text-brand' : 'text-muted'}`}
               >
-                {index + 1}. {title}
+                <span
+                  className={`flex h-7 w-7 items-center justify-center rounded-full border text-xs ${
+                    index < step
+                      ? 'border-brand bg-brand text-white'
+                      : index === step
+                        ? 'border-brand bg-surface text-brand'
+                        : 'border-line bg-surface text-muted'
+                  }`}
+                >
+                  {index + 1}
+                </span>
+                <span>{title}</span>
+                {index < STEP_TITLES.length - 1 && <span aria-hidden="true" className="h-px w-6 bg-line" />}
               </li>
             ))}
           </ol>
         </header>
 
-        <section className="flex-1 rounded-3xl border border-slate-800 bg-slate-900/70 p-6">
+        <section className="flex-1 card p-8">
           {loadError ? (
-            <p role="alert" className="text-rose-300">
+            <p role="alert" className="text-danger">
               {loadError}
             </p>
           ) : !loaded ? (
-            <p className="text-slate-400">טוען…</p>
+            <p className="text-muted">טוען…</p>
           ) : (
             renderStep()
           )}
         </section>
 
         {saveError && (
-          <p role="alert" className="text-sm text-rose-300">
+          <p role="alert" className="text-sm text-danger">
             {saveError}
           </p>
         )}
         {loaded && currentError && step !== STEP_TITLES.length - 1 && (
-          <p className="text-sm text-amber-300">{currentError}</p>
+          <p className="rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn">{currentError}</p>
         )}
 
         <footer className="flex items-center justify-between">
-          <button type="button" className={secondaryButton} onClick={onCancel}>
+          <button type="button" className="btn-secondary" onClick={onCancel}>
             ביטול
           </button>
           <div className="flex gap-3">
-            <button type="button" className={secondaryButton} disabled={step === 0} onClick={() => setStep(step - 1)}>
+            <button type="button" className="btn-secondary" disabled={step === 0} onClick={() => setStep(step - 1)}>
               הקודם
             </button>
             {isLastStep ? (
               <button
                 type="button"
-                className={primaryButton}
+                className="btn-primary"
                 disabled={!loaded || saving || 'error' in plan}
                 onClick={() => void save()}
               >
@@ -550,7 +549,7 @@ function StudyProgramWizard({ mode, programId, today, onSaved, onCancel }: Study
             ) : (
               <button
                 type="button"
-                className={primaryButton}
+                className="btn-primary"
                 disabled={!loaded || currentError !== null}
                 onClick={() => setStep(step + 1)}
               >

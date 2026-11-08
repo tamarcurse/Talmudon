@@ -1,12 +1,31 @@
 @import 'tailwindcss';
 
+@theme {
+  --color-canvas: #f7f9fc;
+  --color-surface: #ffffff;
+  --color-line: #e3e8f0;
+  --color-ink: #1e293b;
+  --color-muted: #64748b;
+  --color-brand: #2563eb;
+  --color-brand-strong: #1d4ed8;
+  --color-brand-soft: #eff4ff;
+  --color-sky: #0ea5e9;
+  --color-success: #10b981;
+  --color-success-soft: #ecfdf5;
+  --color-danger: #e11d48;
+  --color-danger-soft: #fff1f2;
+  --color-warn: #b45309;
+  --color-warn-soft: #fffbeb;
+  --font-sans: 'Segoe UI', Arial, Tahoma, sans-serif;
+  --shadow-card: 0 1px 2px rgb(15 23 42 / 0.04), 0 4px 16px rgb(15 23 42 / 0.05);
+}
+
 :root {
-  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  color: rgba(255, 255, 255, 0.92);
-  background: #020817;
-  color-scheme: dark;
+  color: var(--color-ink);
+  background: var(--color-canvas);
+  color-scheme: light;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -21,9 +40,9 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background:
-    radial-gradient(circle at top, rgba(34, 211, 238, 0.18), transparent 30%),
-    #020817;
+  font-family: var(--font-sans);
+  background: var(--color-canvas);
+  color: var(--color-ink);
 }
 
 #root {
@@ -36,4 +55,56 @@ body {
 
 button {
   cursor: pointer;
+}
+
+input[type='checkbox'],
+input[type='radio'] {
+  accent-color: var(--color-brand);
+}
+
+@layer components {
+  .btn-primary,
+  .btn-secondary,
+  .btn-ghost {
+    @apply inline-flex items-center justify-center rounded-xl px-4 py-2 text-sm font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .btn-primary {
+    @apply bg-brand text-white hover:bg-brand-strong;
+  }
+  .btn-secondary {
+    @apply border border-line bg-surface text-ink hover:bg-canvas;
+  }
+  .btn-ghost {
+    @apply text-brand hover:bg-brand-soft;
+  }
+  .field {
+    @apply rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/15;
+  }
+  .card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+  .chip {
+    @apply rounded-full border border-line bg-surface px-3 py-1.5 text-sm text-ink transition hover:bg-canvas;
+  }
+  .chip-active {
+    @apply rounded-full border border-brand bg-brand-soft px-3 py-1.5 text-sm font-medium text-brand;
+  }
+  .badge-warn,
+  .badge-success,
+  .badge-danger,
+  .badge-neutral {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium;
+  }
+  .badge-warn {
+    @apply bg-warn-soft text-warn;
+  }
+  .badge-success {
+    @apply bg-success-soft text-emerald-700;
+  }
+  .badge-danger {
+    @apply bg-danger-soft text-danger;
+  }
+  .badge-neutral {
+    @apply bg-canvas text-muted;
+  }
 }
