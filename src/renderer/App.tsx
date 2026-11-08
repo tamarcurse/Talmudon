@@ -3,22 +3,25 @@ import Dashboard from './components/dashboard/Dashboard'
 import AppHeader from './components/layout/AppHeader'
 import ConfirmDialog from './components/layout/ConfirmDialog'
 import ProgramDetail from './components/program/ProgramDetail'
+import TodayScreen from './components/today/TodayScreen'
 import StudyProgramWizard from './components/wizard/StudyProgramWizard'
 
 type View =
+  | { name: 'today' }
   | { name: 'dashboard' }
   | { name: 'wizard'; mode: 'create' }
   | { name: 'wizard'; mode: 'edit'; programId: number; returnTo: View }
   | { name: 'program'; programId: number }
 
 function App() {
-  const [view, setView] = useState<View>({ name: 'dashboard' })
-  const [confirmLeave, setConfirmLeave] = useState(false)
+  const [view, setView] = useState<View>({ name: 'today' })
+  // The destination chosen while the wizard is open, awaiting confirmation to discard unsaved changes.
+  const [pendingLeave, setPendingLeave] = useState<View | null>(null)
   const backToDashboard = () => setView({ name: 'dashboard' })
 
-  function goHome() {
-    if (view.name === 'wizard') setConfirmLeave(true)
-    else backToDashboard()
+  function navigate(target: View) {
+    if (view.name === 'wizard') setPendingLeave(target)
+    else setView(target)
   }
 
   function renderView() {
@@ -45,6 +48,15 @@ function App() {
       )
     }
 
+    if (view.name === 'today') {
+      return (
+        <TodayScreen
+          onCreate={() => setView({ name: 'wizard', mode: 'create' })}
+          onOpen={(programId) => setView({ name: 'program', programId })}
+        />
+      )
+    }
+
     return (
       <Dashboard
         onCreate={() => setView({ name: 'wizard', mode: 'create' })}
@@ -57,19 +69,19 @@ function App() {
   }
 
   return (
-    <AppHeader onHome={goHome}>
+    <AppHeader onHome={() => navigate({ name: 'today' })} onAllPrograms={() => navigate({ name: 'dashboard' })}>
       {renderView()}
-      {confirmLeave && (
+      {pendingLeave && (
         <ConfirmDialog
           title="לצאת בלי לשמור?"
           message="השינויים שלא נשמרו יאבדו."
           confirmLabel="יציאה"
           cancelLabel="המשך עריכה"
           onConfirm={() => {
-            setConfirmLeave(false)
-            backToDashboard()
+            setView(pendingLeave)
+            setPendingLeave(null)
           }}
-          onCancel={() => setConfirmLeave(false)}
+          onCancel={() => setPendingLeave(null)}
         />
       )}
     </AppHeader>

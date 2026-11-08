@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { PageProgressRecord, ProgramInput, ProgramRecord, ProgramStatus, ProgramSummary, ShasPageRecord } from './database.js'
+import type { PageProgressRecord, ProgramInput, ProgramRecord, ProgramStatus, ProgramSummary, ShasPageRecord, TodayProgramPlan } from './database.js'
 import type { UnitTarget } from './progress.js'
 
 contextBridge.exposeInMainWorld('talmudonBridge', {
@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('talmudonBridge', {
     ipcRenderer.invoke('database:set-program-status', id, status),
   recalculateProgram: (id: number) => ipcRenderer.invoke('database:recalculate-program', id),
   getPageProgress: (programId: number) => ipcRenderer.invoke('database:get-page-progress', programId),
+  getTodayPlan: () => ipcRenderer.invoke('database:get-today-plan'),
   setUnitsCompleted: (programId: number, targets: UnitTarget[], done: boolean) =>
     ipcRenderer.invoke('database:set-units-completed', programId, targets, done),
 })
@@ -40,6 +41,7 @@ declare global {
       setProgramStatus: (id: number, status: ProgramStatus) => Promise<void>
       recalculateProgram: (id: number) => Promise<void>
       getPageProgress: (programId: number) => Promise<PageProgressRecord[]>
+      getTodayPlan: () => Promise<TodayProgramPlan[]>
       setUnitsCompleted: (programId: number, targets: UnitTarget[], done: boolean) => Promise<void>
     }
   }

@@ -7,6 +7,7 @@ import type {
   ProgramStatus,
   ProgramSummary,
   ShasPageRecord,
+  TodayProgramPlan,
 } from '../main/database'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitFlags, type UnitTarget } from '../main/progress'
 
@@ -54,6 +55,8 @@ export type MockBridgeOptions = {
   progress?: PageProgressRecord[]
   /** Replaces the schedule rows once the program is rescheduled (recalculateProgram or updateProgram). */
   progressAfterRecalc?: PageProgressRecord[]
+  /** Plan returned by getTodayPlan (stateful: setUnitsCompleted updates the units inside it). */
+  todayPlan?: TodayProgramPlan[]
 }
 
 export function mockBridge(options: MockBridgeOptions = {}) {
@@ -61,15 +64,19 @@ export function mockBridge(options: MockBridgeOptions = {}) {
   let summaries = options.summaries ?? []
   let progress = options.progress ?? []
   let program = options.program ?? null
+  let todayPlan = options.todayPlan ?? []
+  const planRows = (plan: TodayProgramPlan) => [...plan.todayPages, ...plan.overduePages]
   const progressProgramId = options.program?.id
   const bridge = {
     // Summaries of the program whose schedule is mocked reflect its units, like the real service.
     listProgramSummaries: vi.fn(async () =>
-      options.progress === undefined
-        ? summaries
-        : summaries.map((summary) =>
-            summary.id === progressProgramId ? { ...summary, percentComplete: unitPercent(progress) } : summary,
-          ),
+      summaries.map((summary) => {
+        if (options.progress !== undefined && summary.id === progressProgramId) {
+          return { ...summary, percentComplete: unitPercent(progress) }
+        }
+        const plan = todayPlan.find((entry) => entry.programId === summary.id)
+        return plan ? { ...summary, percentComplete: unitPercent(planRows(plan)) } : summary
+      }),
     ),
     setProgramStatus: vi.fn(async (id: number, status: ProgramStatus) => {
       summaries = summaries.map((summary) => (summary.id === id ? { ...summary, status } : summary))
@@ -84,7 +91,20 @@ export function mockBridge(options: MockBridgeOptions = {}) {
       if (options.progressAfterRecalc) progress = options.progressAfterRecalc
     }),
     getPageProgress: vi.fn(async () => progress.map((row) => ({ ...row, units: { ...row.units } }))),
-    setUnitsCompleted: vi.fn(async (_programId: number, targets: UnitTarget[], done: boolean) => {
+    getTodayPlan: vi.fn(async () => structuredClone(todayPlan)),
+    setUnitsCompleted: vi.fn(async (programId: number, targets: UnitTarget[], done: boolean) => {
+      const applyUnits = (row: PageProgressRecord): PageProgressRecord => {
+        const units = { ...row.units }
+        for (const target of targets) {
+          if (target.pageNumber === row.pageNumber) units[target.unit] = done
+        }
+        return { ...row, units, isPageCompleted: isPageComplete(units) }
+      }
+      todayPlan = todayPlan.map((plan) =>
+        plan.programId === programId
+          ? { ...plan, todayPages: plan.todayPages.map(applyUnits), overduePages: plan.overduePages.map(applyUnits) }
+          : plan,
+      )
       progress = progress.map((row) => {
         const units = { ...row.units }
         for (const target of targets) {

@@ -720,3 +720,82 @@ describe('program summaries and pause/resume', () => {
     expect(() => service.setProgramStatus(9999, 'paused', '2026-01-03')).toThrow(/unknown program/i)
   })
 })
+
+describe('getTodayPlan', () => {
+  const baseInput: ProgramInput = {
+    tractateId: 1,
+    programName: 'ברכות',
+    startPage: 2,
+    endPage: 10,
+    startDate: '2026-11-01',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-09',
+    restWeekdays: [],
+    restDates: [],
+    restHolidays: [],
+  }
+
+  function setup() {
+    const service = new DatabaseService(createTestPath('today'))
+    testServices.push(service)
+    service.initialize()
+    return service
+  }
+
+  it("returns today's scheduled page with the program and tractate names", () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+
+    const plan = service.getTodayPlan('2026-11-03')
+
+    expect(plan).toHaveLength(1)
+    expect(plan[0]).toMatchObject({ programId: id, programName: 'ברכות', tractateName: 'ברכות' })
+    expect(plan[0].todayPages.map((p) => p.pageNumber)).toEqual([4])
+  })
+
+  it('lists earlier unfinished pages as overdue, in order, without completed ones', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    completePage(service, id, 3)
+
+    const [program] = service.getTodayPlan('2026-11-04')
+
+    expect(program.overduePages.map((p) => p.pageNumber)).toEqual([2, 4])
+    expect(program.todayPages.map((p) => p.pageNumber)).toEqual([5])
+  })
+
+  it("keeps a completed page of today in todayPages so it can be undone", () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    completePage(service, id, 4)
+
+    const [program] = service.getTodayPlan('2026-11-03')
+
+    expect(program.todayPages).toHaveLength(1)
+    expect(program.todayPages[0]).toMatchObject({ pageNumber: 4, isPageCompleted: true })
+  })
+
+  it('omits paused programs', () => {
+    const service = setup()
+    const id = service.createProgram(baseInput)
+    service.setProgramStatus(id, 'paused', '2026-11-03')
+
+    expect(service.getTodayPlan('2026-11-03')).toEqual([])
+  })
+
+  it('includes a program with nothing to study today, with empty lists', () => {
+    const service = setup()
+    service.createProgram({ ...baseInput, startDate: '2026-12-01', targetEndDate: '2026-12-09' })
+
+    const [program] = service.getTodayPlan('2026-11-03')
+
+    expect(program.todayPages).toEqual([])
+    expect(program.overduePages).toEqual([])
+  })
+
+  it('rejects an invalid date', () => {
+    const service = setup()
+    expect(() => service.getTodayPlan('2026-13-45')).toThrow(/date/i)
+  })
+})

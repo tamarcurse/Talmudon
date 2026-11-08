@@ -69,7 +69,17 @@ export type PageProgressRecord = {
   completedAt: string | null
 }
 
-type SqliteDatabase = InstanceType<typeof Database>
+export type TodayProgramPlan = {
+  programId: number
+  programName: string
+  tractateName: string
+  /** Pages scheduled for today, including completed ones (so they can be undone). */
+  todayPages: PageProgressRecord[]
+  /** Earlier unfinished pages, ordered by scheduled date then page. */
+  overduePages: PageProgressRecord[]
+}
+
+type SqliteDatabase =InstanceType<typeof Database>
 
 const ALLOWED_TABLE_NAMES = new Set([
   'tractates',
@@ -704,6 +714,33 @@ export class DatabaseService {
         rest: { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays },
       })
       return { id: row.id, programName: row.program_name, status: row.status, ...metrics }
+    })
+  }
+
+  getTodayPlan(today: string = localToday()): TodayProgramPlan[] {
+    if (!isValidIsoDate(today)) {
+      throw new Error(`Invalid date: ${String(today)}`)
+    }
+    const db = this.ensureDatabase()
+    const rows = db
+      .prepare(
+        `SELECT p.id, p.program_name, t.name_he AS tractate_name
+           FROM study_programs p JOIN tractates t ON t.id = p.tractate_id
+          WHERE p.status = 'active' ORDER BY p.id ASC`,
+      )
+      .all() as Array<{ id: number; program_name: string; tractate_name: string }>
+
+    return rows.map((row) => {
+      const pages = this.getPageProgress(row.id)
+      return {
+        programId: row.id,
+        programName: row.program_name,
+        tractateName: row.tractate_name,
+        todayPages: pages.filter((page) => page.scheduledDate === today),
+        overduePages: pages
+          .filter((page) => page.scheduledDate < today && !page.isPageCompleted)
+          .sort((a, b) => a.scheduledDate.localeCompare(b.scheduledDate) || a.pageNumber - b.pageNumber),
+      }
     })
   }
 

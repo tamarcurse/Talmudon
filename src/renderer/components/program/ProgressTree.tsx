@@ -45,7 +45,7 @@ function PageRow({ page, onSetUnits }: { page: PageNode; onSetUnits: SetUnits })
   )
 }
 
-function SideRow({ side, pageName, onSetUnits }: { side: SideNode; pageName: string; onSetUnits: SetUnits }) {
+export function SideRow({ side, pageName, onSetUnits }: { side: SideNode; pageName: string; onSetUnits: SetUnits }) {
   const sideName = `${pageName} עמוד ${side.side === 'a' ? "א'" : "ב'"}`
   return (
     <li>

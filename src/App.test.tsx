@@ -44,16 +44,78 @@ function renderApp(options: MockBridgeOptions = {}) {
   return bridge
 }
 
+async function openDashboard() {
+  fireEvent.click(await screen.findByRole('button', { name: 'כל התוכניות' }))
+  await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })
+}
+
+const LOGO = { name: 'תלמודון – מסך הבית' }
+const TODAY_HEADING = { name: 'מה לומדים היום' }
+const TODAY_PLAN = [
+  {
+    programId: 5,
+    programName: 'שבת בשנה',
+    tractateName: 'שבת',
+    todayPages: [progressRow(2, '2026-11-08')],
+    overduePages: [],
+  },
+]
+
 describe('App', () => {
-  it('opens on the programs dashboard', async () => {
+  it('opens on the today screen', async () => {
+    renderApp({ todayPlan: TODAY_PLAN })
+
+    expect(screen.getByRole('heading', TODAY_HEADING)).toBeInTheDocument()
+    expect(await screen.findByText('מסכת שבת')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'תוכניות הלימוד שלי' })).not.toBeInTheDocument()
+  })
+
+  it('"all programs" leads to the dashboard and the logo returns to today', async () => {
     renderApp()
 
-    expect(screen.getByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+    await openDashboard()
     expect(await screen.findByText('שבת בשנה')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', LOGO))
+    expect(await screen.findByRole('heading', TODAY_HEADING)).toBeInTheDocument()
+  })
+
+  it('opening a program from the today screen shows the program view', async () => {
+    renderApp({ todayPlan: TODAY_PLAN })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+
+    expect(await screen.findByRole('heading', { name: 'שבת בשנה' })).toBeInTheDocument()
+  })
+
+  it.each([
+    ['all programs', { name: 'כל התוכניות' }, { name: 'תוכניות הלימוד שלי' }],
+    ['the logo', LOGO, TODAY_HEADING],
+  ])('leaving the wizard through %s asks for confirmation and then goes there', async (_label, button, heading) => {
+    renderApp()
+
+    fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
+    await screen.findByLabelText('חיפוש מסכת')
+
+    fireEvent.click(screen.getByRole('button', button))
+    expect(screen.getByRole('dialog', { name: 'לצאת בלי לשמור?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'יציאה' }))
+
+    expect(await screen.findByRole('heading', heading)).toBeInTheDocument()
+  })
+
+  it('dashboard pie reflects pages marked learned on the today screen', async () => {
+    renderApp({ todayPlan: TODAY_PLAN })
+
+    fireEvent.click(await screen.findByRole('button', { name: "למדתי דף ב'" }))
+    await openDashboard()
+
+    expect(await screen.findByRole('img', { name: 'הושלמו 100%' })).toBeInTheDocument()
   })
 
   it('create opens the wizard in create mode', async () => {
     const bridge = renderApp()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'צור תוכנית חדשה' }))
 
@@ -63,6 +125,7 @@ describe('App', () => {
 
   it('edit loads the program into the wizard', async () => {
     const bridge = renderApp()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'עריכה' }))
 
@@ -72,6 +135,7 @@ describe('App', () => {
 
   it('open enters the program view and can return to the dashboard', async () => {
     const bridge = renderApp()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
     expect(await screen.findByRole('heading', { name: 'שבת בשנה' })).toBeInTheDocument()
@@ -84,6 +148,7 @@ describe('App', () => {
 
   it('edit from the program view opens the wizard and returns to the program view', async () => {
     const bridge = renderApp()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
     fireEvent.click(await screen.findByRole('button', { name: 'עריכת תוכנית' }))
@@ -97,8 +162,9 @@ describe('App', () => {
 
   it('shows the top bar on the dashboard, program view and wizard', async () => {
     renderApp()
-    const logo = { name: 'תלמודון – מסך הבית' }
+    const logo = LOGO
     expect(screen.getByRole('button', logo)).toBeInTheDocument()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
     await screen.findByRole('heading', { name: 'שבת בשנה' })
@@ -109,14 +175,15 @@ describe('App', () => {
     expect(screen.getByRole('button', logo)).toBeInTheDocument()
   })
 
-  it('logo returns from the program view to the dashboard', async () => {
+  it('logo returns from the program view to the today screen', async () => {
     renderApp()
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
     await screen.findByRole('heading', { name: 'שבת בשנה' })
 
-    fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
-    expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', LOGO))
+    expect(await screen.findByRole('heading', TODAY_HEADING)).toBeInTheDocument()
   })
 
   it('logo in the wizard asks for confirmation before leaving', async () => {
@@ -134,11 +201,12 @@ describe('App', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'תלמודון – מסך הבית' }))
     fireEvent.click(screen.getByRole('button', { name: 'יציאה' }))
-    expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+    expect(await screen.findByRole('heading', TODAY_HEADING)).toBeInTheDocument()
   })
 
   it('dashboard pie reflects units checked in the program view', async () => {
     renderApp({ progress: [progressRow(2, '2026-11-08')] })
+    await openDashboard()
 
     fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
     fireEvent.click(await screen.findByRole('button', { name: "פתח דף ב'" }))

@@ -4,10 +4,11 @@ import CalendarToggle from '../dashboard/CalendarToggle'
 type Props = {
   children: ReactNode
   onHome: () => void
+  onAllPrograms?: () => void
 }
 
 /** Shared page shell: thin top bar (app name + calendar toggle) and a centered content area. */
-function AppHeader({ children, onHome }: Props) {
+function AppHeader({ children, onHome, onAllPrograms }: Props) {
   return (
     <main className="min-h-screen bg-canvas text-ink" dir="rtl" lang="he">
       <div className="border-b border-line bg-surface">
@@ -43,7 +44,14 @@ function AppHeader({ children, onHome }: Props) {
               תלמודון
             </span>
           </button>
-          <CalendarToggle />
+          <div className="flex items-center gap-3">
+            {onAllPrograms && (
+              <button type="button" onClick={onAllPrograms} className="btn-ghost">
+                כל התוכניות
+              </button>
+            )}
+            <CalendarToggle />
+          </div>
         </div>
       </div>
       <div className="mx-auto max-w-6xl px-6 py-8">{children}</div>
