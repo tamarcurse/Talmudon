@@ -20,6 +20,7 @@ function summary(overrides: Partial<ProgramSummary> = {}): ProgramSummary {
     lag: 0,
     lead: 0,
     estimatedEndDate: '2026-12-25',
+    completedAt: null,
     ...overrides,
   }
 }
@@ -121,5 +122,79 @@ describe('pause and resume', () => {
     expect(bridge.setProgramStatus).toHaveBeenCalledWith(3, 'active')
     await waitFor(() => expect(screen.queryByText('תוכנית מושהית')).not.toBeInTheDocument())
     expect(screen.getByRole('button', { name: 'השהה' })).toBeInTheDocument()
+  })
+})
+
+describe('completed programs', () => {
+  const done = (overrides: Partial<ProgramSummary> = {}) =>
+    summary({
+      id: 9,
+      programName: 'שבת שהושלמה',
+      status: 'completed',
+      percentComplete: 100,
+      completedAt: '2026-11-05',
+      ...overrides,
+    })
+
+  it('lists them under "הושלמו" with the completion date, not in the active grid', async () => {
+    await renderDashboard({ summaries: [summary({ id: 1 }), done()] })
+
+    const section = (await screen.findByRole('heading', { name: 'הושלמו' })).closest('section') as HTMLElement
+    expect(within(section).getByText('שבת שהושלמה')).toBeInTheDocument()
+    expect(within(section).getByText(`הושלמה ב-${formatIsoDate('2026-11-05', 'gregorian')}`)).toBeInTheDocument()
+    expect(within(section).queryByText('ברכות בשנה')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: 'עברי' }))
+    expect(screen.getByText(`הושלמה ב-${formatIsoDate('2026-11-05', 'hebrew')}`)).toBeInTheDocument()
+  })
+
+  it('offers only open and delete', async () => {
+    await renderDashboard({ summaries: [done()] })
+
+    const card = await screen.findByRole('article')
+    expect(within(card).getByRole('button', { name: 'כניסה לתוכנית' })).toBeInTheDocument()
+    expect(within(card).getByRole('button', { name: 'מחיקה' })).toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'עריכה' })).not.toBeInTheDocument()
+    expect(within(card).queryByRole('button', { name: 'השהה' })).not.toBeInTheDocument()
+    expect(within(card).queryByText('בקצב')).not.toBeInTheDocument()
+  })
+
+  it('hides the section when there are none', async () => {
+    await renderDashboard({ summaries: [summary({ id: 1 })] })
+    expect(await screen.findByText('1 תוכניות')).toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'הושלמו' })).not.toBeInTheDocument()
+  })
+
+  it('counts only the others and skips the empty state', async () => {
+    await renderDashboard({ summaries: [summary({ id: 1 }), done()] })
+    expect(await screen.findByText('1 תוכניות')).toBeInTheDocument()
+    expect(screen.queryByText('אין עדיין תוכניות')).not.toBeInTheDocument()
+  })
+})
+
+describe('deleting a program', () => {
+  it('cancelling leaves the program alone', async () => {
+    const { bridge } = await renderDashboard({ summaries: [summary({ id: 3 })] })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'מחיקה' }))
+    expect(screen.getByRole('heading', { name: 'למחוק את התוכנית?' })).toBeInTheDocument()
+    expect(screen.getByText('כל ההתקדמות תימחק לצמיתות.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ביטול' }))
+
+    expect(bridge.deleteProgram).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(screen.getByText('ברכות בשנה')).toBeInTheDocument()
+  })
+
+  it('confirming deletes it, reloads the list and removes the card', async () => {
+    const { bridge } = await renderDashboard({ summaries: [summary({ id: 3 })] })
+
+    fireEvent.click(await screen.findByRole('button', { name: 'מחיקה' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'מחיקה' }))
+
+    expect(bridge.deleteProgram).toHaveBeenCalledWith(3)
+    await waitFor(() => expect(screen.queryByText('ברכות בשנה')).not.toBeInTheDocument())
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(await screen.findByText('אין עדיין תוכניות')).toBeInTheDocument()
   })
 })

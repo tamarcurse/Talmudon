@@ -19,6 +19,8 @@ const PROGRAM: ProgramRecord = {
   endPage: 3,
   startDate: '2026-11-08',
   paceMode: 'daily_pace',
+  status: 'active',
+  completedAt: null,
   pagesPerDay: 2,
   targetEndDate: '2026-11-08',
   restWeekdays: [],
@@ -26,12 +28,13 @@ const PROGRAM: ProgramRecord = {
   restHolidays: [],
 }
 
+const ALL_DONE = { side_a_rashi: true, side_a_tosafot: true, side_b_rashi: true, side_b_tosafot: true }
 const ONE_PAGE = [progressRow(3, '2026-11-08')]
 const TWO_PAGES = [progressRow(2, '2026-11-08'), progressRow(3, '2026-11-08')]
 
 async function renderDetail(options: MockBridgeOptions = {}) {
   const bridge = mockBridge({ program: PROGRAM, progress: ONE_PAGE, ...options })
-  const handlers = { onBack: vi.fn(), onEdit: vi.fn() }
+  const handlers = { onBack: vi.fn(), onEdit: vi.fn(), onDeleted: vi.fn() }
   render(
     <CalendarProvider>
       <AppHeader onHome={vi.fn()}>
@@ -123,9 +126,15 @@ describe('marking', () => {
     expect(await screen.findByRole('img', { name: 'הושלמו 100%' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: dayName })).toBeChecked()
     expect(screen.getByRole('checkbox', { name: "דף ב'" })).toBeChecked()
+  })
+
+  it('unmarking a day clears every unit beneath it', async () => {
+    const { bridge } = await renderDetail({
+      progress: TWO_PAGES.map((row) => progressRow(row.pageNumber, row.scheduledDate, ALL_DONE)),
+    })
 
     fireEvent.click(screen.getByRole('checkbox', { name: dayName }))
-    expect(bridge.setUnitsCompleted.mock.calls[1][2]).toBe(false)
+    expect(bridge.setUnitsCompleted.mock.calls[0][2]).toBe(false)
     expect(await screen.findByRole('img', { name: 'הושלמו 0%' })).toBeInTheDocument()
     expect(screen.getByRole('checkbox', { name: dayName })).not.toBeChecked()
   })
@@ -307,5 +316,74 @@ describe('calendar view', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: "דף ג'" }))
     fireEvent.click(screen.getByRole('button', { name: 'לוח שנה' }))
     expect(cellOn('2026-11-08')).toHaveAccessibleName(/דף ג' הושלם/)
+  })
+})
+
+describe('deleting', () => {
+  it('asks for confirmation, and cancelling keeps the program', async () => {
+    const { bridge, onDeleted } = await renderDetail()
+
+    fireEvent.click(screen.getByRole('button', { name: 'מחיקה' }))
+    expect(screen.getByRole('heading', { name: 'למחוק את התוכנית?' })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'ביטול' }))
+
+    expect(bridge.deleteProgram).not.toHaveBeenCalled()
+    expect(onDeleted).not.toHaveBeenCalled()
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+  })
+
+  it('confirming deletes the program and reports it', async () => {
+    const { bridge, onDeleted } = await renderDetail()
+
+    fireEvent.click(screen.getByRole('button', { name: 'מחיקה' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'מחיקה' }))
+
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled())
+    expect(bridge.deleteProgram).toHaveBeenCalledWith(7)
+  })
+})
+
+describe('completed program', () => {
+  const COMPLETED = { ...PROGRAM, status: 'completed' as const, completedAt: '2026-11-05' }
+  const doneRows = TWO_PAGES.map((row) => progressRow(row.pageNumber, row.scheduledDate, ALL_DONE))
+
+  it('shows the completion date and hides edit and recalculate', async () => {
+    await renderDetail({ program: COMPLETED, progress: doneRows })
+
+    expect(await screen.findByText(`הושלמה ב-${formatIsoDate('2026-11-05', 'gregorian')}`)).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'חישוב מסלול מחדש' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'עריכת תוכנית' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'מחיקה' })).toBeInTheDocument()
+  })
+
+  it('locks the checkboxes', async () => {
+    const { bridge } = await renderDetail({ program: COMPLETED, progress: doneRows })
+    await screen.findByText(/הושלמה ב-/)
+
+    const day = screen.getByRole('checkbox', { name: dayName })
+    expect(day).toBeDisabled()
+    fireEvent.click(day)
+    expect(bridge.setUnitsCompleted).not.toHaveBeenCalled()
+  })
+
+  it('switches to the locked view once the last unit is marked', async () => {
+    const { bridge } = await renderDetail({ progress: TWO_PAGES })
+    expect(screen.queryByText(/הושלמה ב-/)).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('checkbox', { name: dayName }))
+
+    expect(await screen.findByText(/הושלמה ב-/)).toBeInTheDocument()
+    expect(bridge.getProgram).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('checkbox', { name: dayName })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: 'עריכת תוכנית' })).not.toBeInTheDocument()
+  })
+
+  it('does not reload the program while marking short of 100%', async () => {
+    const { bridge } = await renderDetail({ progress: TWO_PAGES })
+
+    fireEvent.click(screen.getByRole('checkbox', { name: "דף ב'" }))
+    await screen.findByRole('img', { name: 'הושלמו 50%' })
+
+    expect(bridge.getProgram).toHaveBeenCalledTimes(1)
   })
 })

@@ -43,6 +43,7 @@ function App() {
           key={view.programId}
           programId={view.programId}
           onBack={backToDashboard}
+          onDeleted={backToDashboard}
           onEdit={(programId) => setView({ name: 'wizard', mode: 'edit', programId, returnTo: view })}
         />
       )

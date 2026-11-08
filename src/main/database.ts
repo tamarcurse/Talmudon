@@ -48,15 +48,22 @@ export type ProgramInput = {
   restHolidays: string[]
 }
 
-export type ProgramRecord = ProgramInput & { id: number }
+export type ProgramRecord = ProgramInput & {
+  id: number
+  status: ProgramStatus
+  completedAt: string | null
+}
 
-export const PROGRAM_STATUSES = ['active', 'paused'] as const
-export type ProgramStatus = (typeof PROGRAM_STATUSES)[number]
+/** Statuses a caller may set by hand; `completed` is reached only by marking the last unit. */
+export const SETTABLE_PROGRAM_STATUSES = ['active', 'paused'] as const
+export type SettableProgramStatus = (typeof SETTABLE_PROGRAM_STATUSES)[number]
+export type ProgramStatus = SettableProgramStatus | 'completed'
 
 export type ProgramSummary = ProgramMetrics & {
   id: number
   programName: string
   status: ProgramStatus
+  completedAt: string | null
 }
 
 export type PageProgressRecord = {
@@ -112,6 +119,7 @@ const STUDY_PROGRAMS_MIGRATIONS: Array<{ column: string; definition: string }> =
   { column: 'start_date', definition: 'start_date TEXT' },
   { column: 'pace_mode', definition: "pace_mode TEXT NOT NULL DEFAULT 'daily_pace'" },
   { column: 'paused_at', definition: 'paused_at TEXT' },
+  { column: 'completed_at', definition: 'completed_at TEXT' },
 ]
 
 // A page (daf) is complete when all four parts are done; side/page completion is derived, not stored.
@@ -232,6 +240,7 @@ export class DatabaseService {
     this.migrateUserSettings()
     this.migrateStudyPrograms()
     this.migratePageProgress()
+    this.migrateCompletedPrograms()
     this.seedTractates()
     this.seedShasPages()
     return this
@@ -272,6 +281,32 @@ export class DatabaseService {
       )
       db.exec('ALTER TABLE page_progress DROP COLUMN is_page_completed')
     })()
+  }
+
+  // Programs finished before the `completed` status existed move there, dated by their last page.
+  private migrateCompletedPrograms(): void {
+    const db = this.ensureDatabase()
+    db.exec(
+      `UPDATE study_programs
+          SET status = 'completed', paused_at = NULL,
+              completed_at = (SELECT date(MAX(completed_at), 'localtime') FROM page_progress
+                               WHERE program_id = study_programs.id)
+        WHERE status <> 'completed'
+          AND EXISTS (SELECT 1 FROM page_progress WHERE program_id = study_programs.id)
+          AND NOT EXISTS (SELECT 1 FROM page_progress
+                           WHERE program_id = study_programs.id AND NOT ${PAGE_COMPLETE_SQL})
+          AND (SELECT COUNT(*) FROM page_progress WHERE program_id = study_programs.id)
+              = end_page_num - start_page_num + 1`,
+    )
+  }
+
+  private assertNotCompleted(id: number): void {
+    const row = this.ensureDatabase().prepare('SELECT status FROM study_programs WHERE id = ?').get(id) as
+      | { status: string }
+      | undefined
+    if (row?.status === 'completed') {
+      throw new Error(`Program ${id} is completed`)
+    }
   }
 
   private migrateUserSettings(): void {
@@ -452,6 +487,7 @@ export class DatabaseService {
     const db = this.ensureDatabase()
 
     const save = db.transaction(() => {
+      this.assertNotCompleted(id)
       const result = db
         .prepare(
           `UPDATE study_programs
@@ -482,7 +518,17 @@ export class DatabaseService {
 
   recalculateProgram(id: number, today: string = localToday()): void {
     const db = this.ensureDatabase()
-    db.transaction(() => this.recalculateInTransaction(id, today))()
+    db.transaction(() => {
+      this.assertNotCompleted(id)
+      this.recalculateInTransaction(id, today)
+    })()
+  }
+
+  deleteProgram(id: number): void {
+    const result = this.ensureDatabase().prepare('DELETE FROM study_programs WHERE id = ?').run(id)
+    if (result.changes === 0) {
+      throw new Error(`Unknown program: ${id}`)
+    }
   }
 
   private insertInitialPageProgress(programId: number, input: ProgramInput): void {
@@ -609,9 +655,10 @@ export class DatabaseService {
   }
 
   /** Sets atomic units on or off in one transaction; any unknown target rolls everything back. */
-  setUnitsCompleted(programId: number, targets: UnitTarget[], done: boolean): void {
+  setUnitsCompleted(programId: number, targets: UnitTarget[], done: boolean, today: string = localToday()): void {
     const db = this.ensureDatabase()
     db.transaction(() => {
+      this.assertNotCompleted(programId)
       for (const { pageNumber, unit } of targets) {
         if (!isUnitKey(unit)) {
           throw new Error(`Unknown unit: ${String(unit)}`)
@@ -633,6 +680,12 @@ export class DatabaseService {
       for (const pageNumber of new Set(targets.map((target) => target.pageNumber))) {
         syncCompletedAt.run(programId, pageNumber)
       }
+      // A program with every page complete moves to `completed` and is locked from then on.
+      db.prepare(
+        `UPDATE study_programs SET status = 'completed', completed_at = ?, paused_at = NULL
+          WHERE id = ? AND NOT EXISTS (
+            SELECT 1 FROM page_progress WHERE program_id = ? AND NOT ${PAGE_COMPLETE_SQL})`,
+      ).run(today, programId, programId)
     })()
   }
 
@@ -641,7 +694,7 @@ export class DatabaseService {
     const row = db
       .prepare(
         `SELECT id, tractate_id, program_name, start_page_num, end_page_num, target_end_date,
-                pages_per_day, pace_mode,
+                pages_per_day, pace_mode, status, completed_at,
                 COALESCE(start_date, substr(created_at, 1, 10)) AS start_date
            FROM study_programs WHERE id = ?`,
       )
@@ -655,6 +708,8 @@ export class DatabaseService {
           target_end_date: string
           pages_per_day: number
           pace_mode: PaceMode
+          status: ProgramStatus
+          completed_at: string | null
           start_date: string
         }
       | undefined
@@ -684,6 +739,8 @@ export class DatabaseService {
       paceMode: row.pace_mode,
       pagesPerDay: row.pages_per_day,
       targetEndDate: row.target_end_date,
+      status: row.status,
+      completedAt: row.completed_at,
       restWeekdays: restRows
         .filter((rest) => rest.rest_type === 'weekday' && rest.day_of_week !== null)
         .map((rest) => rest.day_of_week as number),
@@ -699,8 +756,14 @@ export class DatabaseService {
   listProgramSummaries(today: string = localToday()): ProgramSummary[] {
     const db = this.ensureDatabase()
     const rows = db
-      .prepare('SELECT id, program_name, status, paused_at FROM study_programs ORDER BY id ASC')
-      .all() as Array<{ id: number; program_name: string; status: ProgramStatus; paused_at: string | null }>
+      .prepare('SELECT id, program_name, status, paused_at, completed_at FROM study_programs ORDER BY id ASC')
+      .all() as Array<{
+      id: number
+      program_name: string
+      status: ProgramStatus
+      paused_at: string | null
+      completed_at: string | null
+    }>
 
     return rows.map((row) => {
       const program = this.getProgram(row.id) as ProgramRecord
@@ -713,7 +776,13 @@ export class DatabaseService {
         pagesPerDay: program.pagesPerDay,
         rest: { weekdays: program.restWeekdays, dates: program.restDates, holidays: program.restHolidays },
       })
-      return { id: row.id, programName: row.program_name, status: row.status, ...metrics }
+      return {
+        id: row.id,
+        programName: row.program_name,
+        status: row.status,
+        completedAt: row.completed_at,
+        ...metrics,
+      }
     })
   }
 
@@ -745,7 +814,7 @@ export class DatabaseService {
   }
 
   setProgramStatus(id: number, status: string, today: string = localToday()): void {
-    if (!(PROGRAM_STATUSES as readonly unknown[]).includes(status)) {
+    if (!(SETTABLE_PROGRAM_STATUSES as readonly unknown[]).includes(status)) {
       throw new Error(`Invalid program status: ${String(status)}`)
     }
     if (!isValidIsoDate(today)) {
@@ -753,6 +822,7 @@ export class DatabaseService {
     }
     const db = this.ensureDatabase()
     db.transaction(() => {
+      this.assertNotCompleted(id)
       const result = db
         .prepare('UPDATE study_programs SET status = ?, paused_at = ? WHERE id = ?')
         .run(status, status === 'paused' ? today : null, id)

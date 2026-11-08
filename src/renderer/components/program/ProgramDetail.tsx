@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { PageProgressRecord, ProgramInput, ProgramRecord } from '../../../main/database'
 import { UNIT_KEYS, isPageComplete, unitPercent, type UnitTarget } from '../../../main/progress'
+import { useCalendar } from '../../context/CalendarContext'
+import { formatIsoDate } from '../../lib/hebrewDate'
 import { buildProgressTree } from '../../lib/progressTree'
 import ProgressPie from '../dashboard/ProgressPie'
+import ConfirmDialog from '../layout/ConfirmDialog'
 import ProgramCalendar from './ProgramCalendar'
 import ProgressTree from './ProgressTree'
 import RecalculateDialog from './RecalculateDialog'
@@ -11,6 +14,7 @@ type Props = {
   programId: number
   onBack: () => void
   onEdit: (id: number) => void
+  onDeleted: () => void
 }
 
 function localTodayIso(): string {
@@ -19,10 +23,12 @@ function localTodayIso(): string {
   return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
 }
 
-function ProgramDetail({ programId, onBack, onEdit }: Props) {
+function ProgramDetail({ programId, onBack, onEdit, onDeleted }: Props) {
+  const { calendarType } = useCalendar()
   const [program, setProgram] = useState<ProgramRecord | null>(null)
   const [rows, setRows] = useState<PageProgressRecord[]>([])
   const [recalculating, setRecalculating] = useState(false)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
   const [view, setView] = useState<'tree' | 'calendar'>('tree')
 
   const reloadRows = useCallback(async () => {
@@ -47,21 +53,24 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
   const days = useMemo(() => buildProgressTree(rows), [rows])
   // The percent is derived on every render from the atomic units; it is never stored separately.
   const percent = unitPercent(rows)
+  const isCompleted = program?.status === 'completed'
 
   async function setUnits(targets: UnitTarget[], done: boolean) {
+    if (isCompleted) return
     const touched = new Set(targets.map((target) => `${target.pageNumber}:${target.unit}`))
+    const next = rows.map((row) => {
+      const units = { ...row.units }
+      for (const key of UNIT_KEYS) {
+        if (touched.has(`${row.pageNumber}:${key}`)) units[key] = done
+      }
+      return { ...row, units, isPageCompleted: isPageComplete(units) }
+    })
     // Optimistic update; a failed save falls back to what the bridge actually holds.
-    setRows((current) =>
-      current.map((row) => {
-        const units = { ...row.units }
-        for (const key of UNIT_KEYS) {
-          if (touched.has(`${row.pageNumber}:${key}`)) units[key] = done
-        }
-        return { ...row, units, isPageCompleted: isPageComplete(units) }
-      }),
-    )
+    setRows(next)
     try {
       await window.talmudonBridge.setUnitsCompleted(programId, targets, done)
+      // Marking the last unit completes the program on the backend; reload to show it locked.
+      if (unitPercent(next) === 100) setProgram(await window.talmudonBridge.getProgram(programId))
     } catch (error) {
       console.error('Failed to save progress', error)
       await reloadRows()
@@ -80,6 +89,12 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
     setRecalculating(false)
   }
 
+  async function confirmDelete() {
+    await window.talmudonBridge.deleteProgram(programId)
+    setConfirmingDelete(false)
+    onDeleted()
+  }
+
   const today = localTodayIso()
 
   return (
@@ -88,13 +103,23 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
         <div className="flex items-center gap-4">
           <ProgressPie percent={percent} />
           <h1 className="text-3xl font-bold text-ink">{program?.programName}</h1>
+          {isCompleted && program?.completedAt && (
+            <span className="badge-success">הושלמה ב-{formatIsoDate(program.completedAt, calendarType)}</span>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-3">
-          <button type="button" onClick={() => setRecalculating(true)} disabled={!program} className="btn-primary">
-            חישוב מסלול מחדש
-          </button>
-          <button type="button" onClick={() => onEdit(programId)} className="btn-secondary">
-            עריכת תוכנית
+          {!isCompleted && (
+            <>
+              <button type="button" onClick={() => setRecalculating(true)} disabled={!program} className="btn-primary">
+                חישוב מסלול מחדש
+              </button>
+              <button type="button" onClick={() => onEdit(programId)} className="btn-secondary">
+                עריכת תוכנית
+              </button>
+            </>
+          )}
+          <button type="button" onClick={() => setConfirmingDelete(true)} className="btn-secondary">
+            מחיקה
           </button>
           <button type="button" onClick={onBack} className="btn-ghost">
             חזרה לתוכניות
@@ -117,9 +142,20 @@ function ProgramDetail({ programId, onBack, onEdit }: Props) {
       </div>
 
       {view === 'tree' ? (
-        <ProgressTree days={days} onSetUnits={(targets, done) => void setUnits(targets, done)} />
+        <ProgressTree days={days} onSetUnits={(targets, done) => void setUnits(targets, done)} readOnly={isCompleted} />
       ) : (
         program && <ProgramCalendar program={program} rows={rows} today={today} />
+      )}
+
+      {confirmingDelete && (
+        <ConfirmDialog
+          title="למחוק את התוכנית?"
+          message="כל ההתקדמות תימחק לצמיתות."
+          confirmLabel="מחיקה"
+          cancelLabel="ביטול"
+          onConfirm={() => void confirmDelete()}
+          onCancel={() => setConfirmingDelete(false)}
+        />
       )}
 
       {recalculating && program && (

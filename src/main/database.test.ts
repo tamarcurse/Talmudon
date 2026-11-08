@@ -21,11 +21,12 @@ afterEach(() => {
   testDirs.length = 0
 })
 
-function completePage(service: DatabaseService, programId: number, pageNumber: number) {
+function completePage(service: DatabaseService, programId: number, pageNumber: number, today?: string) {
   service.setUnitsCompleted(
     programId,
     UNIT_KEYS.map((unit) => ({ pageNumber, unit })),
     true,
+    today,
   )
 }
 
@@ -226,7 +227,7 @@ describe('programs API', () => {
 
     const id = service.createProgram(input)
 
-    expect(service.getProgram(id)).toEqual({ id, ...input })
+    expect(service.getProgram(id)).toEqual({ id, status: 'active', completedAt: null, ...input })
   })
 
   it('returns null for an unknown program', () => {
@@ -267,7 +268,7 @@ describe('programs API', () => {
     service.updateProgram(id, updated, baseInput.startDate)
 
     // pagesPerDay is derived from the target date in target_date mode, so only check it is set.
-    expect(service.getProgram(id)).toEqual({ id, ...updated, pagesPerDay: expect.any(Number) })
+    expect(service.getProgram(id)).toEqual({ id, status: 'active', completedAt: null, ...updated, pagesPerDay: expect.any(Number) })
     expect(service.getRowCount('program_rest_days')).toBe(1)
     expect(service.getRowCount('study_programs')).toBe(1)
   })
@@ -307,7 +308,7 @@ describe('programs API', () => {
 
       expect(() => service.updateProgram(id, { ...baseInput, restWeekdays: [5, 9] })).toThrow()
 
-      expect(service.getProgram(id)).toEqual({ id, ...baseInput, restWeekdays: [6] })
+      expect(service.getProgram(id)).toEqual({ id, status: 'active', completedAt: null, ...baseInput, restWeekdays: [6] })
     })
 
     it('rejects an impossible calendar date such as 30 February', () => {
@@ -343,7 +344,7 @@ describe('programs API', () => {
     service.initialize()
 
     const id = service.createProgram(baseInput)
-    expect(service.getProgram(id)).toEqual({ id, ...baseInput })
+    expect(service.getProgram(id)).toEqual({ id, status: 'active', completedAt: null, ...baseInput })
   })
 
   it('round-trips rest holidays and replaces them on update', () => {
@@ -797,5 +798,153 @@ describe('getTodayPlan', () => {
   it('rejects an invalid date', () => {
     const service = setup()
     expect(() => service.getTodayPlan('2026-13-45')).toThrow(/date/i)
+  })
+})
+
+describe('deleting programs', () => {
+  const input: ProgramInput = {
+    tractateId: 1,
+    programName: 'תוכנית א',
+    startPage: 2,
+    endPage: 3,
+    startDate: '2026-11-01',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-02',
+    restWeekdays: [6],
+    restDates: [],
+    restHolidays: [],
+  }
+
+  function setup() {
+    const service = new DatabaseService(createTestPath('delete'))
+    testServices.push(service)
+    return service.initialize()
+  }
+
+  it('removes the program with its progress and rest days, leaving others untouched', () => {
+    const service = setup()
+    const a = service.createProgram(input)
+    const b = service.createProgram({ ...input, programName: 'תוכנית ב' })
+    const pagesOfB = service.getPageProgress(b).length
+
+    service.deleteProgram(a)
+
+    expect(service.getProgram(a)).toBeNull()
+    expect(service.getProgram(b)).not.toBeNull()
+    expect(service.getRowCount('study_programs')).toBe(1)
+    expect(service.getRowCount('page_progress')).toBe(pagesOfB)
+    expect(service.getRowCount('program_rest_days')).toBe(1)
+  })
+
+  it('rejects an unknown program', () => {
+    expect(() => setup().deleteProgram(9999)).toThrow(/unknown program/i)
+  })
+})
+
+describe('completing programs', () => {
+  const input: ProgramInput = {
+    tractateId: 1,
+    programName: 'תוכנית א',
+    startPage: 2,
+    endPage: 3,
+    startDate: '2026-11-01',
+    paceMode: 'daily_pace',
+    pagesPerDay: 1,
+    targetEndDate: '2026-11-02',
+    restWeekdays: [],
+    restDates: [],
+    restHolidays: [],
+  }
+
+  function setup() {
+    const service = new DatabaseService(createTestPath('completing'))
+    testServices.push(service)
+    return service.initialize()
+  }
+
+  function finish(service: DatabaseService, id: number, today = '2026-11-05') {
+    completePage(service, id, 2, today)
+    completePage(service, id, 3, today)
+  }
+
+  it('moves to completed with the date when the last unit is marked', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    finish(service, id)
+
+    expect(service.listProgramSummaries('2026-11-06')[0]).toMatchObject({
+      status: 'completed',
+      completedAt: '2026-11-05',
+    })
+    expect(service.getProgram(id)).toMatchObject({ status: 'completed', completedAt: '2026-11-05' })
+  })
+
+  it('stays active while partly done', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    completePage(service, id, 2, '2026-11-05')
+
+    expect(service.listProgramSummaries('2026-11-06')[0]).toMatchObject({ status: 'active', completedAt: null })
+  })
+
+  it('completes a paused program and clears its pause', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    service.setProgramStatus(id, 'paused', '2026-11-03')
+    finish(service, id)
+
+    expect(service.listProgramSummaries('2026-11-06')[0]).toMatchObject({ status: 'completed' })
+    const raw = (service as unknown as { db: Database.Database }).db
+    expect(raw.prepare('SELECT paused_at FROM study_programs WHERE id = ?').get(id)).toEqual({ paused_at: null })
+  })
+
+  it('locks a completed program against every change', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    finish(service, id)
+    const before = service.getPageProgress(id)
+
+    expect(() => service.setUnitsCompleted(id, [{ pageNumber: 2, unit: 'side_a_rashi' }], false)).toThrow(/completed/i)
+    expect(() => service.updateProgram(id, { ...input, programName: 'אחר' })).toThrow(/completed/i)
+    expect(() => service.recalculateProgram(id)).toThrow(/completed/i)
+    expect(() => service.setProgramStatus(id, 'paused')).toThrow(/completed/i)
+    expect(service.getPageProgress(id)).toEqual(before)
+    expect(service.getProgram(id)?.programName).toBe('תוכנית א')
+  })
+
+  it('cannot be set by hand', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    expect(() => service.setProgramStatus(id, 'completed')).toThrow(/invalid program status/i)
+  })
+
+  it('is omitted from the today plan', () => {
+    const service = setup()
+    const id = service.createProgram(input)
+    finish(service, id)
+    expect(service.getTodayPlan('2026-11-05')).toEqual([])
+  })
+
+  it('migrates an old database whose programs are already fully done', () => {
+    const dbPath = createTestPath('completed-migration')
+    const first = new DatabaseService(dbPath)
+    first.initialize()
+    const id = first.createProgram(input)
+    completePage(first, id, 2, '2026-11-02')
+    completePage(first, id, 3, '2026-11-03')
+    first.close()
+
+    const raw = new Database(dbPath)
+    raw.exec("ALTER TABLE study_programs DROP COLUMN completed_at; UPDATE study_programs SET status = 'active'")
+    raw.exec("UPDATE page_progress SET completed_at = '2026-11-02 10:00:00' WHERE page_number = 2")
+    raw.exec("UPDATE page_progress SET completed_at = '2026-11-03 12:00:00' WHERE page_number = 3")
+    raw.close()
+
+    const service = new DatabaseService(dbPath)
+    testServices.push(service)
+    service.initialize()
+    expect(service.listProgramSummaries('2026-11-10')[0]).toMatchObject({ status: 'completed' })
+    expect(service.listProgramSummaries('2026-11-10')[0].completedAt).toBe('2026-11-03')
   })
 })

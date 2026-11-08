@@ -8,6 +8,7 @@ type Props = {
   onOpen: (id: number) => void
   onEdit: (id: number) => void
   onToggleStatus: (summary: ProgramSummary) => void
+  onDelete: (summary: ProgramSummary) => void
 }
 
 function paceLabel(lag: number, lead: number): string {
@@ -17,9 +18,10 @@ function paceLabel(lag: number, lead: number): string {
   return 'בקצב'
 }
 
-function ProgramCard({ summary, onOpen, onEdit, onToggleStatus }: Props) {
+function ProgramCard({ summary, onOpen, onEdit, onToggleStatus, onDelete }: Props) {
   const { calendarType } = useCalendar()
   const paused = summary.status === 'paused'
+  const completed = summary.status === 'completed'
   const net = summary.lead - summary.lag
   const paceBadge = net < 0 ? 'badge-danger' : net > 0 ? 'badge-success' : 'badge-neutral'
 
@@ -36,14 +38,22 @@ function ProgramCard({ summary, onOpen, onEdit, onToggleStatus }: Props) {
       <div className="mt-4 flex items-center gap-5">
         <ProgressPie percent={summary.percentComplete} />
         <div className="space-y-2 text-sm">
-          <p>
-            <span className={paceBadge}>{paceLabel(summary.lag, summary.lead)}</span>
-          </p>
-          {summary.estimatedEndDate && (
-            <p className="text-muted">
-              סיום משוער:{' '}
-              <span className="font-semibold text-ink">{formatIsoDate(summary.estimatedEndDate, calendarType)}</span>
-            </p>
+          {completed ? (
+            summary.completedAt && (
+              <p className="font-semibold text-ink">הושלמה ב-{formatIsoDate(summary.completedAt, calendarType)}</p>
+            )
+          ) : (
+            <>
+              <p>
+                <span className={paceBadge}>{paceLabel(summary.lag, summary.lead)}</span>
+              </p>
+              {summary.estimatedEndDate && (
+                <p className="text-muted">
+                  סיום משוער:{' '}
+                  <span className="font-semibold text-ink">{formatIsoDate(summary.estimatedEndDate, calendarType)}</span>
+                </p>
+              )}
+            </>
           )}
         </div>
       </div>
@@ -52,11 +62,18 @@ function ProgramCard({ summary, onOpen, onEdit, onToggleStatus }: Props) {
         <button type="button" onClick={() => onOpen(summary.id)} className="btn-primary">
           כניסה לתוכנית
         </button>
-        <button type="button" onClick={() => onEdit(summary.id)} className="btn-secondary">
-          עריכה
-        </button>
-        <button type="button" onClick={() => onToggleStatus(summary)} className="btn-secondary">
-          {paused ? 'הפעל מחדש' : 'השהה'}
+        {!completed && (
+          <>
+            <button type="button" onClick={() => onEdit(summary.id)} className="btn-secondary">
+              עריכה
+            </button>
+            <button type="button" onClick={() => onToggleStatus(summary)} className="btn-secondary">
+              {paused ? 'הפעל מחדש' : 'השהה'}
+            </button>
+          </>
+        )}
+        <button type="button" onClick={() => onDelete(summary)} className="btn-secondary">
+          מחיקה
         </button>
       </div>
     </article>

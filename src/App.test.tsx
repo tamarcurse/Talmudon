@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ProgramRecord, ProgramSummary } from './main/database'
 import App from './renderer/App'
@@ -17,6 +17,7 @@ const SUMMARY: ProgramSummary = {
   lag: 0,
   lead: 0,
   estimatedEndDate: '2026-12-25',
+  completedAt: null,
 }
 
 const PROGRAM: ProgramRecord = {
@@ -27,6 +28,8 @@ const PROGRAM: ProgramRecord = {
   endPage: 157,
   startDate: '2026-11-08',
   paceMode: 'daily_pace',
+  status: 'active',
+  completedAt: null,
   pagesPerDay: 1,
   targetEndDate: '2027-04-12',
   restWeekdays: [],
@@ -214,5 +217,19 @@ describe('App', () => {
     fireEvent.click(screen.getByRole('button', { name: 'חזרה לתוכניות' }))
 
     expect(await screen.findByRole('img', { name: 'הושלמו 25%' })).toBeInTheDocument()
+  })
+
+  it('deleting from the program screen returns to the dashboard without the program', async () => {
+    const bridge = renderApp({ todayPlan: TODAY_PLAN })
+    await openDashboard()
+    fireEvent.click(await screen.findByRole('button', { name: 'כניסה לתוכנית' }))
+    await screen.findByRole('heading', { name: 'שבת בשנה' })
+
+    fireEvent.click(screen.getByRole('button', { name: 'מחיקה' }))
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'מחיקה' }))
+
+    expect(await screen.findByRole('heading', { name: 'תוכניות הלימוד שלי' })).toBeInTheDocument()
+    expect(bridge.deleteProgram).toHaveBeenCalledWith(5)
+    expect(await screen.findByText('אין עדיין תוכניות')).toBeInTheDocument()
   })
 })

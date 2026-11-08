@@ -62,6 +62,7 @@ ipcMain.handle('database:list-program-summaries', () => databaseService.listProg
 ipcMain.handle('database:set-program-status', (_event, id: number, status: string) =>
   databaseService.setProgramStatus(id, status),
 )
+ipcMain.handle('database:delete-program', (_event, id: number) => databaseService.deleteProgram(id))
 
 ipcMain.handle('database:recalculate-program', (_event, id: number) =>
   databaseService.recalculateProgram(id),

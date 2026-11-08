@@ -4,7 +4,7 @@ import type {
   PageProgressRecord,
   ProgramInput,
   ProgramRecord,
-  ProgramStatus,
+  SettableProgramStatus,
   ProgramSummary,
   ShasPageRecord,
   TodayProgramPlan,
@@ -78,8 +78,12 @@ export function mockBridge(options: MockBridgeOptions = {}) {
         return plan ? { ...summary, percentComplete: unitPercent(planRows(plan)) } : summary
       }),
     ),
-    setProgramStatus: vi.fn(async (id: number, status: ProgramStatus) => {
+    setProgramStatus: vi.fn(async (id: number, status: SettableProgramStatus) => {
       summaries = summaries.map((summary) => (summary.id === id ? { ...summary, status } : summary))
+    }),
+    deleteProgram: vi.fn(async (id: number) => {
+      summaries = summaries.filter((summary) => summary.id !== id)
+      todayPlan = todayPlan.filter((plan) => plan.programId !== id)
     }),
     getUserSetting: vi.fn().mockResolvedValue(options.calendar ?? null),
     setUserSetting: vi.fn().mockResolvedValue(undefined),
@@ -112,9 +116,13 @@ export function mockBridge(options: MockBridgeOptions = {}) {
         }
         return { ...row, units, isPageCompleted: isPageComplete(units) }
       })
+      // Like the real service: finishing every unit completes (and locks) the program.
+      if (program && program.id === programId && progress.length > 0 && progress.every((row) => row.isPageCompleted)) {
+        program = { ...program, status: 'completed', completedAt: '2026-11-08' }
+      }
     }),
     updateProgram: vi.fn(async (id: number, input: ProgramInput) => {
-      if (program) program = { ...input, id }
+      if (program) program = { ...program, ...input, id }
       if (options.progressAfterRecalc) progress = options.progressAfterRecalc
     }),
   }

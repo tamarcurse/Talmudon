@@ -447,6 +447,8 @@ describe('edit mode', () => {
     endPage: 30,
     startDate: '2026-11-08',
     paceMode: 'target_date',
+    status: 'active',
+    completedAt: null,
     pagesPerDay: 1.2,
     targetEndDate: '2026-12-20',
     restWeekdays: [5, 6],
